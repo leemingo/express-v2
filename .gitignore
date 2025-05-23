@@ -1,0 +1,19 @@
+# Log files and directories
+logs/
+*.log
+
+# Compiled Python files and cache
+__pycache__/
+*.pyc
+
+# Output files
+*.out
+
+# Operating System generated files
+.DS_Store
+Thumbs.db
+
+# IDE/Editor specific files (optional, add as needed)
+.vscode/
+.idea/
+*.swp
