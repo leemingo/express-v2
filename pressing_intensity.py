@@ -173,7 +173,32 @@ class CustomPressingIntensity(PressingIntensity):
         self.output = pd.concat(results_list, ignore_index=True)
         return self
 
-# def load_dfl_spoho(data_path):
+def load_dfl_spoho(data_path):
+    data_path = "/data/MHL/dfl-spoho/processed"
+    
+    coordinates = "secondspectrum"
+    match_id_lst = os.listdir(data_path)
+    total_dict = {match_id : {} for match_id in match_id_lst}
+    for match_id in match_id_lst:
+        os.makedirs(f"{data_path}/{match_id}", exist_ok=True)
+        kloppy_dataset = sportec.load_open_tracking_data(
+                match_id=match_id, coordinates=coordinates
+            )
+        orient = kloppy_dataset.metadata.orientation.value
+        orient = orient.replace("-", "_")
+        dataset = KloppyPolarsDataset(kloppy_dataset=kloppy_dataset, orient_ball_owning=False)
+        model = CustomPressingIntensity(dataset=dataset)
+        print(f"Calcuate Pressing Intensity {match_id}")
+        model.fit(
+            method="teams",
+            ball_method="max",
+            orient=orient,
+            speed_threshold=2.0,
+        )
+        
+        with open(f"{data_path}/{match_id}/{match_id}_presing_intensity.pkl", "wb") as f:
+            pickle.dump(model.output, f)
+
 
 def load_bepro(data_path):
     data_path = "/data/MHL/bepro/processed"
@@ -227,31 +252,9 @@ def load_bepro(data_path):
 
 
 if __name__=="__main__":
-    source = 'bepro'
+    source = 'dfl-spoho'
     if source == 'dfl-spoho':
-        coordinates = "secondspectrum"
-        match_id_lst = [x.split("-")[-1] for x in os.listdir("/data/MHL/dfl-spoho/raw/")]
-        os.makedirs("/data/MHL/pressing-intensity", exist_ok=True)
-        print('test')
-        for match_id in match_id_lst:
-            print(match_id)
-            kloppy_dataset = sportec.load_open_tracking_data(
-                match_id=match_id, coordinates=coordinates
-            )
-
-            dataset = KloppyPolarsDataset(kloppy_dataset=kloppy_dataset, orient_ball_owning=False)
-            home_team, away_team = kloppy_dataset.metadata.teams
-            model = CustomPressingIntensity(dataset=dataset)
-            model.fit(
-                method="teams",
-                ball_method="max",
-                orient="home_away",
-                speed_threshold=2.0,
-            )
-
-            # with open(f"/data/MHL/pressing-intensity/{match_id}.pkl", "wb") as f:
-            #     pickle.dump(model.output, f)
-            break
+        load_dfl_spoho("/data/MHL/dfl-spoho/processed")
     elif source == 'bepro':
         load_bepro("/data/MHL/bepro/processed")
     print("Done")
