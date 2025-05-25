@@ -177,12 +177,12 @@ def load_dfl_spoho(data_path):
     data_path = "/data/MHL/dfl-spoho/processed"
     
     coordinates = "secondspectrum"
-    match_id_lst = os.listdir(data_path)
+    match_id_lst = os.listdir("/data/MHL/dfl-spoho/raw")
     total_dict = {match_id : {} for match_id in match_id_lst}
     for match_id in match_id_lst:
         os.makedirs(f"{data_path}/{match_id}", exist_ok=True)
         kloppy_dataset = sportec.load_open_tracking_data(
-                match_id=match_id, coordinates=coordinates
+                match_id=match_id.split("-")[-1], coordinates=coordinates
             )
         orient = kloppy_dataset.metadata.orientation.value
         orient = orient.replace("-", "_")
@@ -198,6 +198,58 @@ def load_dfl_spoho(data_path):
         
         with open(f"{data_path}/{match_id}/{match_id}_presing_intensity.pkl", "wb") as f:
             pickle.dump(model.output, f)
+
+def load_dfl_confidential(data_path):
+    data_path = "/data/MHL/dfl-confidential/processed"
+    match_id_lst = os.listdir(data_path)
+    total_dict = {match_id : {} for match_id in match_id_lst}
+
+    for match_id in match_id_lst:
+        if os.path.exists(os.path.join(data_path, match_id, f"{match_id}_processed_dict.pkl")):
+            with open(os.path.join(data_path, match_id, f"{match_id}_processed_dict.pkl"), "rb") as f:
+                total_dict[match_id] = pickle.load(f)
+            if total_dict[match_id]['tracking_df'] is None: #'DFL-MAT-J03YIY'
+                continue
+        else:
+            print(f"Proceseed data {match_id} not exists.")
+        
+        tracking_df = total_dict[match_id]['tracking_df']
+        teams_dict = total_dict[match_id]['teams']
+        
+        # Define orientation
+        first_period = tracking_df[(tracking_df['period_id'] == 1)]
+        first_frame = first_period[(first_period['frame_id'] == first_period['frame_id'].min())]
+        left_tid = first_frame.loc[first_frame['x'].idxmin(), 'team_id']
+
+        if left_tid == teams_dict['Home']['tID'].iloc[0]:
+            orient = 'home_away'
+        elif left_tid == teams_dict['Away']['tID'].iloc[0]:
+            orient = 'away_home'
+        else:
+            print('error')
+
+        settings = DefaultSettings(
+            home_team_id=teams_dict['Home']['tID'].iloc[0],
+            away_team_id=teams_dict['Away']['tID'].iloc[0],
+            max_player_speed=C.MAX_PLAYER_SPEED,
+            max_ball_speed=C.MAX_BALL_SPEED,
+            max_player_acceleration=C.MAX_PLAYER_ACCELERATION,
+            max_ball_acceleration=C.MAX_BALL_ACCELERATION,
+            ball_carrier_threshold=C.BALL_CARRIER_THRESHOLD,
+        )
+
+        dataset = PressingIntensityDataset(tracking_df, settings)
+        model = CustomPressingIntensity(dataset=dataset)
+        print(f"Calcuate Pressing Intensity {match_id}")
+        model.fit(
+            method="teams",
+            ball_method="max",
+            orient=orient,
+            speed_threshold=2.0,
+        )
+        with open(f"{data_path}/{match_id}/{match_id}_presing_intensity.pkl", "wb") as f:
+                pickle.dump(model.output, f)
+
 
 
 def load_bepro(data_path):
@@ -252,9 +304,12 @@ def load_bepro(data_path):
 
 
 if __name__=="__main__":
-    source = 'dfl-spoho'
+    source = 'dfl-confidential'
     if source == 'dfl-spoho':
         load_dfl_spoho("/data/MHL/dfl-spoho/processed")
+    elif source == 'dfl-confidential':
+        load_dfl_confidential("/data/MHL/dfl-confidential/processed")
     elif source == 'bepro':
         load_bepro("/data/MHL/bepro/processed")
+    
     print("Done")

@@ -47,3 +47,16 @@ class Group:
     BY_OBJECT_PERIOD = [Column.OBJECT_ID, Column.PERIOD_ID]
     BY_TIMESTAMP = [Column.GAME_ID, Column.PERIOD_ID, Column.FRAME_ID, Column.TIMESTAMP]
 
+TEAM_NAME = {'FC서울' : 'FC Seoul',
+    '강원FC' : 'Gangwon FC',
+    '광주FC' : 'Gwangju FC',
+    '김천 상무 프로축구단' : 'Gimcheon Sangmu',
+    '대구FC' : 'Daegu FC',
+    '대전 하나 시티즌' : 'Daejeon Hana Citizen',
+    '수원FC' : 'Suwon FC',
+    '울산 HD FC' : 'Ulsan HD FC',
+    '인천 유나이티드' : 'Incheon United',
+    '전북 현대 모터스' : 'Jeonbuk Hyundai Motors',
+    '제주SK FC' : 'Jeju SK FC',
+    '포항 스틸러스' : 'Pohang Steelers'
+    }

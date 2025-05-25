@@ -34,16 +34,14 @@ class PressingSequenceDataset(Dataset):
             sequence_length (int, optional): Length of the input sequence (X) in frames. Defaults to 125 (5 seconds).
             feature_cols (list, optional): List of feature columns to use. If None, infers default kinematic features.
         """
-        if match_id_lst is None:
-            # Default list of match IDs if none provided
-            match_id_lst = ['J03WQQ', 'J03WMX', 'J03WOH', 'J03WN1', 'J03WOY', 'J03WR9', 'J03WPY']
         self.data_path = data_path
+        self.match_id_lst = os.listdir(self.data_path)
         self.sequence_length = sequence_length
         # Determine feature columns to use
         self.feature_cols = feature_cols if feature_cols else self._infer_feature_cols()
         # Load and process data to create samples
         self.cols_to_flip = ['x', 'y', 'vx', 'vy', 'ax', 'ay']
-        self._load_data(match_id_lst)
+        self._load_data()
     
     def _normalize_coordinate_direction(self, df, home_team_id):
         """
@@ -111,7 +109,7 @@ class PressingSequenceDataset(Dataset):
             print("Warning: No data found for period 1. Skipping main orientation check.")
         return df_normalized
 
-    def _load_data(self, match_id_lst):
+    def _load_data(self):
         total_dfs = []
         first_frames_list = []
 
@@ -120,7 +118,27 @@ class PressingSequenceDataset(Dataset):
         all_labels = []
         all_presser_ids = []
         all_agent_orders = []
-        for match_id in match_id_lst:
+        if os.path.exists(self.data_path):
+            total_dict = {match_id : {} for match_id in self.match_id_lst}
+            for match_id in self.match_id_lst:
+                print(f"Load match_id : {match_id}")
+                total_dict[match_id] = {}
+                with open(f"{data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
+                    match_dict = pickle.load(f)
+                tracking_df = match_dict['tracking_df']
+                teams_dict = match_dict['teams']
+                with open(f"{data_path}/{match_id}/{match_id}_presing_intensity.pkl", "rb") as f:
+                    pressing_df = pickle.load(f)
+
+                total_df = pd.merge(tracking_df, pressing_df, on=['game_id', 'period_id', 'timestamp', 'frame_id'], how='left')
+                total_df = self._normalize_coordinate_direction(total_df, teams_dict['Home']['pID'].iloc[0])
+                total_dict[match_id]['tracking_df'] = total_df
+                total_dict[match_id]['Home'] = match_dict['teams']['Home']
+                total_dict[match_id]['Away'] = match_dict['teams']['Away']
+
+                
+
+        for match_id in self.match_id_lst:
             print(f"Loading match_id: {match_id}")
             kloppy_dataset = sportec.load_open_tracking_data(
                 match_id=match_id, coordinates=coordinates
@@ -145,7 +163,7 @@ class PressingSequenceDataset(Dataset):
             
              # Normalize coordinate directions
             total_df = self._normalize_coordinate_direction(total_df, home_team.team_id)
-            total_dfs.append(total_df)
+            total_dict[match_id] = total_df
             
             # ball carrier에 대해 pressing intensity가 0.7보다 큰 경우 pressed_df 구성
             pressed_dict = {}
