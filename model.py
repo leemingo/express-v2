@@ -8,8 +8,9 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F  # noqa: N812
+from torch_geometric.data import Data, Batch
 from torch_geometric.nn import GCNConv, global_mean_pool
-from torch_geometric.utils import to_dense_batch, dense_to_batch
+from torch_geometric.utils import dense_to_sparse
 
 from torchmetrics.classification import BinaryAccuracy, BinaryAUROC
 
@@ -570,141 +571,96 @@ class TemporalSoccerMapModel(pl.LightningModule):
 
         return torch.optim.Adam(self.parameters(), **self.optimizer_params["optimizer_params"])
 
-class SpatioTemporalGNNLSTM(nn.Module):
+class STLSTMGNN(nn.Module):
     def __init__(self,
                 model_config : dict,
-                 node_feature_in: int = 8,
-                 node_feature_embed: int = 64,
-                 gnn_hidden: int = 64,
-                 gnn_layers: int = 2,
-                 lstm_hidden: int = 128,
-                 lstm_layers: int = 1,
-                 lstm_dropout: float = 0.2,
-                 lstm_bidirectional: bool = True,
-                 distance_threshold: float = 10.0, # Threshold for spatial graph edges
-                 use_pressing_features: bool = False): # Flag to use pressing intensity
+                 ): # Flag to use pressing intensity
         super().__init__()
-        self.node_feature_in = model_config['node_feature_in']
-        self.node_feature_embed = model_config['node_feature_embed']
-        self.gnn_out_dim = model_config['gnn_hidden']
-        self.distance_threshold = model_config['distance_threshold']
-        self.use_pressing_features = model_config['use_pressing_features']
-        self.gnn_layers = model_config['gnn_layers']
-        self.gnn_hidden = model_config['gnn_hidden']
-        self.lstm_hidden = model_config['lstm_hidden']
-        self.lstm_layers = model_config['lstm_layers']
+        self.feature_dim = model_config['in_channels']
+        self.num_gnn_layers = model_config['num_gnn_layers']
+        self.gnn_hidden_dim = model_config['gnn_hidden_dim']
+        self.num_lstm_layers = model_config['num_lstm_layers']
+        self.lstm_hidden_dim = model_config['lstm_hidden_dim']
         self.lstm_dropout = model_config['lstm_dropout']
-        self.lstm_bidrectional = model_config['lstm_bidrectional']
-        # Node embedding
-        self.node_embed = nn.Linear(self.node_feature_in, self.node_feature_embed)
+        self.lstm_bidirectional = model_config['lstm_bidirectional']
+        self.use_pressing_features = model_config['use_pressing_features']
+        
+        # LSTM Layer
+        self.lstm = nn.LSTM(
+            input_size=self.feature_dim,
+            hidden_size=self.lstm_hidden_dim, num_layers=self.num_lstm_layers, batch_first=True,
+            dropout=self.lstm_dropout if self.num_lstm_layers > 1 else 0, bidirectional=self.lstm_bidirectional)
 
         # GNN Layers (using edge_weight for pressure)
         self.gnn_layers = nn.ModuleList()
-        in_c = self.node_feature_embed
-        for _ in range(gnn_layers):
-            self.gnn_layers.append(GCNConv(in_c, self.gnn_hidden)) # GCNConv can use edge_weight
-            in_c = self.gnn_hidden
-
-        # LSTM Layer
-        self.lstm = nn.LSTM(
-            input_size=self.gnn_out_dim, # Input is pooled GNN features
-            hidden_size=self.lstm_hidden, num_layers=self.lstm_layers, batch_first=True,
-            dropout=self.lstm_dropout if self.lstm_layers > 1 else 0, bidirectional=self.lstm_bidirectional )
+        self.num_directions = 2 if self.lstm_bidirectional else 1
+        in_c = self.lstm_hidden_dim * self.num_directions
+        for _ in range(self.num_gnn_layers):
+            self.gnn_layers.append(GCNConv(in_c, self.gnn_hidden_dim)) # GCNConv can use edge_weight
+            in_c = self.gnn_hidden_dim
 
         # Classifier Head
-        self.num_directions = 2 if self.lstm_bidirectional else 1
-        self.classifier = nn.Linear(self.lstm_hidden * self.num_directions, 1)
+        self.classifier = nn.Linear(self.gnn_hidden_dim, 1)
 
     def forward(self, batch: Dict) -> torch.Tensor:
-        # Extract data from batch dictionary
-        x_seq = batch['features']              # [B, T, A, F]
-        pressing_intensity_seq = batch['pressing_intensity'] # [B, T, 11, 11]
-        agent_orders = batch['agent_order']      # List of lists [B, A] (or just one list if consistent)
-        
-        B, T, A, F_in = x_seq.shape
-        device = x_seq.device
+        B, T, A, F_in = batch['features'].shape
+        device = batch['features'].device
 
-        # Prepare features for all frames at once
-        # Reshape: [B, T, A, F] -> [B*T, A, F]
-        x_frames = x_seq.view(B * T, A, F_in)
-        node_features = F.relu(self.node_embed(x_frames)) # [B*T, A, F_embed]
-
-        # --- Efficient Batched Graph Construction & GNN ---
-        # We need edge_index and edge_weight for all B*T graphs.
-        # PyG's approach is better, but simulating here:
-
-        # 1. Node features flattened for PyG format: [B*T*A, F_embed]
-        node_features_flat = node_features.view(-1, node_features.shape[-1])
-
-        # 2. Create batch index vector: [B*T*A] indicating graph membership
-        batch_idx = torch.arange(B * T, device=device).repeat_interleave(A)
-
-        # 3. Create edge_index and edge_weight (potentially per frame, batched)
-        # This is the most complex part to do efficiently *here*.
-        # Doing it per frame and batching is slow as shown before.
-        # --- Ideal Scenario (Using PyG DataLoader): ---
-        # If DataLoader created PyG Batch objects per frame, input 'x_seq' would be
-        # a list of Batch objects. We'd loop through time, process each Batch object.
-        # --- Simpler Scenario (Fixed Edges + Edge Weights based on last frame maybe?): ---
-        # Let's assume fixed FULLY CONNECTED player graph for structure, and derive weights.
-        # This avoids dynamic edge creation per frame here.
-        num_players = 22 # Excluding ball
-        player_indices = torch.arange(num_players, device=device)
-        edge_index_player = torch.cartesian_prod(player_indices, player_indices).t()
-        edge_index_player = edge_index_player[:, edge_index_player[0] != edge_index_player[1]] # Remove self-loops -> [2, 22*21]
-
-        # Expand edge_index for the whole batch (B*T)
-        # This assumes the *same fixed edge structure* for all frames/samples in the batch
-        num_nodes_total = B * T * A
-        num_edges_per_graph = edge_index_player.shape[1]
-        node_offset = torch.arange(0, B * T, device=device).repeat_interleave(num_edges_per_graph) * A
-        # Need to be careful with indices if ball (A=23) is included/excluded
-        # Assuming edge_index_player is for nodes 0-21 corresponding to first 22 agents
-        edge_index_batch = edge_index_player.repeat(1, B * T) + node_offset
-
-        # --- Calculate Edge Weights (Using Pressure) - Still complex per edge ---
-        # Placeholder: Use default weights for now for simplicity
-        edge_weight_batch = torch.ones(edge_index_batch.shape[1], device=device)
-        # TODO: Implement sophisticated edge_weight calculation here if using pressure.
-        # This would involve mapping flattened edge indices back to (batch, time, player_u, player_v)
-        # and looking up pressure values in pressing_intensity_seq. Highly complex.
-
-        # --- Alternative: Add Pressure Info to Node Features (Simpler) ---
+        # Temporal encoder
+        x_frames = batch['features'].permute(0, 2, 1, 3)
+        x_frames = x_frames.reshape(B * A, T, F_in)
+        lstm_out, (h_n, _) = self.lstm(x_frames)  # h_n: [1, B*A, hidden]
+        if self.lstm_bidirectional:
+            # h_n.shape == [num_layers * 2, B*N, H]
+            h_n = h_n.view(self.num_lstm_layers, 2, B*A, -1)   # -> [num_layers, 2, B*N, H]
+            last_layer = h_n[-1]                    # -> [2, B*N, H]
+            h_fwd, h_bwd = last_layer[0], last_layer[1]
+            node_repr = torch.cat([h_fwd, h_bwd], dim=1)  # [B*N, 2H]
+            node_repr = node_repr.reshape(B, A, -1)
+        else:
+            node_repr = h_n[-1].reshape(B, A, -1)  # [B, A, temporal_hidden_dim]
+        # Spatial encoder
         if self.use_pressing_features:
-             # Calculate pressure received per player per frame
-             # Assume pressing_intensity_seq is [B, T, 11, 11] (PresserTeam -> PressedTeam)
-             # This requires mapping nodes (0-22) to team & 11-player index
-             # Placeholder logic:
-             total_pressure_received = torch.zeros(B*T, A, 1, device=device) # Extra feature dim
-             # ... (Complex logic to calculate total pressure per node using pressing_intensity_seq) ...
-             # Concatenate to node_features before GNN
-             node_features = torch.cat([node_features, total_pressure_received], dim=-1)
-             # Adjust GNN input channel size accordingly in __init__
-             node_features_flat = node_features.view(-1, node_features.shape[-1])
+            avg_press = batch['pressing_intensity'].mean(dim=1) # [B, 11, 11]
+            P, O = avg_press.size(1), avg_press.size(2) # P: number of players, O: number of opponents
+            # Build batch of graphs with pressing intensity as edge features
+            data_list = []
+            for i in range(B):
+                feats = node_repr[i]  # [N, 2H]
+                # Dense edge attribute matrix
+                W = torch.zeros((A, A), device=device)
+                # presser nodes: first P, opponent nodes: next O
+                W[:P, P:P+O] = avg_press[i]
+                W[P:P+O, :P] = avg_press[i].t()
+                # ball (last node) edges remain zeros
 
+                edge_index, edge_attr = dense_to_sparse(W)
+                data_list.append(Data(x=feats, edge_index=edge_index, edge_attr=edge_attr))
 
-        # --- Apply GNN layers ---
-        gnn_node_output = node_features_flat
-        for gnn_layer in self.gnn_layers:
-             # Apply GCNConv using batched edge_index and potentially edge_weight
-             gnn_node_output = gnn_layer(gnn_node_output, edge_index_batch, edge_weight=edge_weight_batch).relu() # [B*T*A, F_out]
+        else:
+            # Build batch of fully connected graphs including ball
+            data_list = []
+            for i in range(B):
+                feats = node_repr[i]    # [A, temporal_hidden]
+                # Fully connected adjacency (no self-loops)
+                adj = torch.ones((A, A), device=device) - torch.eye(A, device=device)
+                edge_index, edge_weight = dense_to_sparse(adj)
+                data_list.append(Data(x=feats, edge_index=edge_index, edge_attr=edge_weight))
 
-        # --- Aggregate node features for each frame ---
-        graph_features = global_mean_pool(gnn_node_output, batch_idx) # Shape: [B*T, F_out]
-
-        # --- Reshape for LSTM ---
-        lstm_input = graph_features.view(B, T, -1) # Shape: [B, T, F_out]
-
-        # --- Apply LSTM ---
-        lstm_out, (h_n, c_n) = self.lstm(lstm_input)
-
-        # --- Select LSTM output ---
-        last_step_output = lstm_out[:, -1, :] # Shape: [B, Num_Directions * Hidden_Size]
-
-        # --- Classifier ---
-        logits = self.classifier(last_step_output) # Shape: [B, 1]
-
+        batch_graph = Batch.from_data_list(data_list)
+        # Spatial GNN: apply each layer
+        x = batch_graph.x
+        for conv in self.gnn_layers:
+            x = conv(x, batch_graph.edge_index, batch_graph.edge_attr)
+            x = torch.relu(x)
+        
+        # Global Pooling
+        pooled = global_mean_pool(x, batch_graph.batch)     # [B, gnn_hidden_dim]
+        
+        logits = self.classifier(pooled).squeeze(-1)  # [B]
         return logits
+
+        
 
 class exPressModel(pl.LightningModule):
     def __init__(self, model_config: dict = None, optimizer_params: dict = None):
@@ -712,9 +668,10 @@ class exPressModel(pl.LightningModule):
         self.save_hyperparameters()
 
         # Instantiate the new GNN+LSTM model
-        self.model = SpatioTemporalGNNLSTM(model_config=model_config)
-
-        self.criterion = nn.BCELoss()
+        self.model = STLSTMGNN(model_config=model_config)
+        
+        # self.criterion = nn.BCELoss()
+        self.criterion = nn.BCEWithLogitsLoss()
 
         self.optimizer_params = optimizer_params
 
@@ -746,7 +703,7 @@ class exPressModel(pl.LightningModule):
         targets_int = targets.int()
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         self.train_accuracy.update(preds, targets_int); self.log("train_acc", self.train_accuracy, on_step=False, on_epoch=True, prog_bar=True)
-        try: self.train_auroc.update(preds, targets_int); self.log("train_auroc", self.train_auroc, on_step=False, on_epoch=True)
+        try: self.train_auroc.update(preds, targets_int); self.log("train_auroc", self.train_auroc, on_step=False, on_epoch=True, prog_bar=True)
         except ValueError: pass
         return loss
 
@@ -755,9 +712,10 @@ class exPressModel(pl.LightningModule):
         targets_int = targets.int()
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.val_accuracy.update(preds, targets_int); self.log("val_acc", self.val_accuracy, on_step=False, on_epoch=True, prog_bar=True)
-        try: self.val_auroc.update(preds, targets_int); self.log("val_auroc", self.val_auroc, on_step=False, on_epoch=True)
+        try: self.val_auroc.update(preds, targets_int); self.log("val_auroc", self.val_auroc, on_step=False, on_epoch=True, prog_bar=True)
         except ValueError: pass
-        return {"val_loss": loss}
+        # return {"val_loss": loss}
+        return loss
 
     def test_step(self, batch: dict, batch_idx: int) -> Optional[Dict]:
         loss, preds, targets = self.step(batch)
@@ -766,13 +724,15 @@ class exPressModel(pl.LightningModule):
         self.test_accuracy.update(preds, targets_int); self.log("test_acc", self.test_accuracy, on_step=False, on_epoch=True, logger=True)
         try: self.test_auroc.update(preds, targets_int); self.log("test_auroc", self.test_auroc, on_step=False, on_epoch=True, logger=True)
         except ValueError: pass
-        return {"test_loss": loss}
+        # return {"test_loss": loss}
+        return loss
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
-        # Add weight decay etc. from hparams if needed
-        # optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
-        return optimizer
+        """Choose what optimizers and learning-rate schedulers to use in your optimization.
 
+        See examples here:
+            https://pytorch-lightning.readthedocs.io/en/latest/common/lightning_module.html#configure-optimizers
+        """
 
+        return torch.optim.Adam(self.parameters(), **self.optimizer_params["optimizer_params"])
