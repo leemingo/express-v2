@@ -6,7 +6,7 @@ import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader, random_split
 
-from datasets import PressingSequenceDataset, SoccerMapInputDataset # Assuming dataset.py contains this
+from datasets import PressingSequenceDataset, SoccerMapInputDataset, exPressInputDataset # Assuming dataset.py contains this
 from components.base import BaseComponent
 from model import PytorchSoccerMapModel, TemporalSoccerMapModel # Assuming model.py contains this
 

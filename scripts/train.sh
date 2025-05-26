@@ -1,0 +1,1 @@
+python train.py --model soccermap --mode train --root_path /data/MHL/pressing-intensity
