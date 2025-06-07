@@ -161,6 +161,10 @@ def _calculate_kinematics(df: pd.DataFrame, smoothing_params: dict, max_speed: f
         period_df = df[df['period_id'] == period_id].copy()
         period_df = period_df.sort_values(by='timestamp') # Ensure order for diff
 
+        # Replacing Nan values with linear interpolation.
+        period_df['x'] = period_df['x'].interpolate().copy()
+        period_df['y'] = period_df['y'].interpolate().copy()
+
         # Calculate time difference (dt) safely
         dt = period_df['timestamp'].diff().dt.total_seconds()
         # Avoid division by zero or large values for the first frame
@@ -310,6 +314,7 @@ def create_tracking_dataframe(match_path, meta_data, teams_dict):
 
         current_agent_df = tracking_df[tracking_df['id'] == agent_id].copy()
         current_agent_df['z'] = 0.0 # bepro data doesn't have z information.
+        current_agent_df = current_agent_df.drop_duplicates(subset=['period_id', 'frame_id'], keep='first') # Some data contains duplicated coordinates for each players in the same frame.
 
         # Drop rows with NaN coordinates for players
         if not is_ball:
@@ -352,31 +357,33 @@ if __name__ == "__main__":
     match_id_lst = os.listdir(data_path)
     total_dict = {match_id : {} for match_id in match_id_lst}
     for match_id in match_id_lst:
+        print(f"Preprocessing Match ID {match_id}: Converting data into kloppy format...")
         match_dict = {}
-        if not os.path.exists(os.path.join(os.path.dirname(data_path), "processed", f"{match_id}_processed_dict.pkl")):
-            match_path = f"{data_path}/{match_id}"
-            # Get Meta Data
-            meta_data_path = f"{match_path}/{match_id}_metadata.json"
-            meta_data = load_single_json(meta_data_path)
+        # if not os.path.exists(os.path.join(os.path.dirname(data_path), "processed", f"{match_id}_processed_dict.pkl")):
+        match_path = f"{data_path}/{match_id}"
+        # Get Meta Data
+        meta_data_path = f"{match_path}/{match_id}_metadata.json"
+        meta_data = load_single_json(meta_data_path)
 
-            # Get Team Info
-            teams_dict = create_team_dataframe(meta_data['home_team'], meta_data['away_team']) # Return: teams_dict['Home'], teams_dict['Away']
+        # Get Team Info
+        teams_dict = create_team_dataframe(meta_data['home_team'], meta_data['away_team']) # Return: teams_dict['Home'], teams_dict['Away']
 
-            # Get Event Data
-            event_df = create_event_dataframe(match_path)
+        # Get Event Data
+        event_df = create_event_dataframe(match_path)
 
-            # Get Tracking Data
-            tracking_df = create_tracking_dataframe(match_path, meta_data, teams_dict)
-            total_dict[match_id]['tracking_df'] = tracking_df
-            total_dict[match_id]['event_df'] = event_df
-            total_dict[match_id]['teams'] = teams_dict
-            total_dict[match_id]['meta_data'] = meta_data
-            with open(os.path.join(os.path.dirname(data_path), "processed", f"{match_id}_processed_dict.pkl"), "wb") as f:
-                pickle.dump(total_dict[match_id], f)
-        
-        else:
-            with open(os.path.join(os.path.dirname(data_path), "processed", f"{match_id}_processed_dict.pkl"), "rb") as f:
-                total_dict[match_id] = pickle.load(f)
+        # Get Tracking Data
+        tracking_df = create_tracking_dataframe(match_path, meta_data, teams_dict)
+        total_dict[match_id]['tracking_df'] = tracking_df
+        total_dict[match_id]['event_df'] = event_df
+        total_dict[match_id]['teams'] = teams_dict
+        total_dict[match_id]['meta_data'] = meta_data
+        save_dir = os.path.join(os.path.dirname(data_path), "processed", match_id, f"{match_id}_processed_dict.pkl")
+        with open(save_dir, "wb") as f:
+            pickle.dump(total_dict[match_id], f)
+        print(f"Preprocessing Match ID {match_id} Done. Saved location: {save_dir}")
+        # else:
+        #     with open(os.path.join(os.path.dirname(data_path), "processed", f"{match_id}_processed_dict.pkl"), "rb") as f:
+        #         total_dict[match_id] = pickle.load(f)
 
             
                   

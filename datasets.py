@@ -11,6 +11,7 @@ from torch.utils.data import Dataset
 import torch.nn.functional as F
 from tqdm import tqdm
 from pressing_intensity import CustomPressingIntensity
+from config import *
 
 coordinates = "secondspectrum"
 num_agents = 23
@@ -35,7 +36,7 @@ class PressingSequenceDataset(Dataset):
             feature_cols (list, optional): List of feature columns to use. If None, infers default kinematic features.
         """
         self.data_path = data_path
-        self.match_id_lst = os.listdir(self.data_path)
+        self.match_id_lst = match_id_lst if match_id_lst is not None else os.listdir(self.data_path)
         self.sequence_length = sequence_length
         # Determine feature columns to use
         self.feature_cols = feature_cols if feature_cols else self._infer_feature_cols()
@@ -109,6 +110,15 @@ class PressingSequenceDataset(Dataset):
             print("Warning: No data found for period 1. Skipping main orientation check.")
         return df_normalized
 
+    def _get_event_name(self, x):
+        event_name_lst = []
+        for val in x:
+            if "event_name" in val:
+                event_name_lst.append(val['event_name'])
+            elif "name" in val:
+                event_name_lst.append(val['name'])
+        return event_name_lst
+
     def _load_data(self):
         total_dfs = []
         first_frames_list = []
@@ -121,89 +131,142 @@ class PressingSequenceDataset(Dataset):
         if os.path.exists(self.data_path):
             total_dict = {match_id : {} for match_id in self.match_id_lst}
             for match_id in self.match_id_lst:
-                try:
-                    print(f"Load match_id : {match_id}")
-                    total_dict[match_id] = {}
-                    with open(f"{data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
-                        match_dict = pickle.load(f)
-                    tracking_df = match_dict['tracking_df']
-                    teams_dict = match_dict['teams']
-                    with open(f"{data_path}/{match_id}/{match_id}_presing_intensity.pkl", "rb") as f:
-                        pressing_df = pickle.load(f)
+                
+                print(f"Load match_id : {match_id}")
+                total_dict[match_id] = {}
+                with open(f"{data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
+                    match_dict = pickle.load(f)
+                tracking_df = match_dict['tracking_df']
+                teams_dict = match_dict['teams']
+                event_df = match_dict['event_df']
+                # Process event dataframe.
+                event_df['events_name'] = event_df['events'].apply(self._get_event_name)
+                event_df['event_time'] = pd.to_timedelta(event_df['event_time'], unit='ms')
 
-                    total_df = pd.merge(tracking_df, pressing_df, on=['game_id', 'period_id', 'timestamp', 'frame_id'], how='left')
-                    total_df = self._normalize_coordinate_direction(total_df, teams_dict['Home']['pID'].iloc[0])
-                    total_df = total_df[total_df['ball_state'] != 'dead']
-                    total_dict[match_id]['tracking_df'] = total_df
-                    total_dict[match_id]['Home'] = match_dict['teams']['Home']
-                    total_dict[match_id]['Away'] = match_dict['teams']['Away']
+                meta_data = match_dict['meta_data']
+                with open(f"{data_path}/{match_id}/{match_id}_presing_intensity.pkl", "rb") as f:
+                    pressing_df = pickle.load(f)
 
-                    # ball carrier에 대해 pressing intensity가 0.7보다 큰 경우 pressed_df 구성
-                    pressed_dict = {}
-                    ball_carrier_df = total_df[total_df['is_ball_carrier'] == True].copy()
-                    ball_carrier_df.sort_values('frame_id', inplace=True)
-                    for idx, row in tqdm(ball_carrier_df.iterrows(), desc= "Get Pressing Intensity", miniters=len(ball_carrier_df)//10):
-                        if len(np.where(row['rows'] == row['id'])[0]) != 0:
-                            pressed_axis = 'rows'
-                            presser_axis = 'columns'
-                            id_loc = np.where(row[pressed_axis] == row['id'])[0]
-                            # 다중 list nested 구조로 되어 있을 수 있으므로 tolist()를 두 번 적용
-                            pressing_values = row['probability_to_intercept'][id_loc].tolist()[0].tolist()
-                        elif len(np.where(row['columns'] == row['id'])[0]) != 0:
-                            pressed_axis = 'columns'
-                            presser_axis = 'rows'
-                            id_loc = np.where(row[pressed_axis] == row['id'])[0]
-                            pressing_values = [x[id_loc] for x in row['probability_to_intercept']]
-                        else:
-                            continue
-                        if max(pressing_values) > 0.9:
-                            pressed_dict[idx] = {}
-                            pressed_dict[idx]['pressing_value'] = max(pressing_values)
-                            max_idx = pressing_values.index(max(pressing_values))
-                            pressed_dict[idx]['pressing_player'] = row[presser_axis][max_idx]
-                    pressed_df = ball_carrier_df.loc[list(pressed_dict.keys())].copy()
-                    pressed_df['pressing_values'] = [d['pressing_value'] for d in pressed_dict.values()]
-                    pressed_df['pressing_player'] = [d.get('pressing_player') for d in pressed_dict.values()]
+                total_df = pd.merge(tracking_df, pressing_df, on=['game_id', 'period_id', 'timestamp', 'frame_id'], how='left')
+                total_df = self._normalize_coordinate_direction(total_df, teams_dict['Home']['pID'].iloc[0])
+                total_df = total_df[total_df['ball_state'] != 'dead']
+                total_dict[match_id]['tracking_df'] = total_df
+                total_dict[match_id]['event_df'] = event_df
+                total_dict[match_id]['meta_data'] = meta_data
+                total_dict[match_id]['Home'] = match_dict['teams']['Home']
+                total_dict[match_id]['Away'] = match_dict['teams']['Away']
+
+                # ball carrier에 대해 pressing intensity가 0.7보다 큰 경우 pressed_df 구성
+                pressed_dict = {}
+                ball_carrier_df = total_df[total_df['is_ball_carrier'] == True].copy()
+                ball_carrier_df.sort_values('frame_id', inplace=True)
+                for idx, row in tqdm(ball_carrier_df.iterrows(), desc= "Get Pressing Intensity", miniters=len(ball_carrier_df)//10):
+                    if len(np.where(row['rows'] == row['id'])[0]) != 0:
+                        pressed_axis = 'rows'
+                        presser_axis = 'columns'
+                        id_loc = np.where(row[pressed_axis] == row['id'])[0]
+                        # 다중 list nested 구조로 되어 있을 수 있으므로 tolist()를 두 번 적용
+                        pressing_values = row['probability_to_intercept'][id_loc].tolist()[0].tolist()
+                    elif len(np.where(row['columns'] == row['id'])[0]) != 0:
+                        pressed_axis = 'columns'
+                        presser_axis = 'rows'
+                        id_loc = np.where(row[pressed_axis] == row['id'])[0]
+                        pressing_values = [x[id_loc] for x in row['probability_to_intercept']]
+                    else:
+                        continue
+                    if max(pressing_values) > 0.9:
+                        pressed_dict[idx] = {}
+                        pressed_dict[idx]['pressing_value'] = max(pressing_values)
+                        max_idx = pressing_values.index(max(pressing_values))
+                        pressed_dict[idx]['pressing_player'] = row[presser_axis][max_idx]
+                pressed_df = ball_carrier_df.loc[list(pressed_dict.keys())].copy()
+                pressed_df['pressing_values'] = [d['pressing_value'] for d in pressed_dict.values()]
+                pressed_df['pressing_player'] = [d.get('pressing_player') for d in pressed_dict.values()]
+                
+                # frame_id 차이가 50 프레임 이상인 경우 새로운 시퀀스로 판단 (즉, 연속된 pressed 행이 아닐 경우)
+                pressed_df['frame_diff'] = pressed_df['frame_id'].diff()
+                pressed_df['sequence_id'] = (pressed_df['frame_diff'] > 50).cumsum()
+                
+                # 각 시퀀스별 마지막 frame을 기준으로 X와 Y를 설정하기 위해 마지막 frame 정보를 구함
+                first_frames = pressed_df.groupby('sequence_id', as_index=False)[['timestamp', 'period_id', 'frame_id', 'id', 'team_id', 'pressing_player']].first()
+
+                # total_df 에서 필요한 컬럼만 추출
+                lookup = total_df[['period_id', 'frame_id', 'id', 'v']]
+
+                # pressing_player 컬럼은 total_df.id 와 매칭되어 있으므로,
+                # 컬럼명을 맞춰서 merge
+                first_frames = first_frames.merge(
+                    lookup.rename(columns={'id': 'pressing_player'}),
+                    on=['period_id', 'frame_id', 'pressing_player'],
+                    how='left'
+                )
+
+                # 압박하는 선수의 속도가 2.0 m/s 인 경우만 압박으로 간주
+                first_frames = first_frames[first_frames['v'] >= 2.0]
+                
+                # 각 마지막 frame에 대해, 이후 125/150 frame 내에 ball_owning_team의 값이 변경되었는지 체크하여 label(Y)을 설정
+                # def check_change(row, window=150):
+                #     current_period_id = row['period_id']
+                #     current_frame_id = row['frame_id']
+
+                #     condition = (
+                #         (total_df['period_id'] == current_period_id) &
+                #         (total_df['frame_id'] >= current_frame_id) &
+                #         (total_df['frame_id'] < current_frame_id + window)
+                #     )
+                #     subset = total_df[condition]
+
+                #     if subset.empty:
+                #         raise ValueError(
+                #             f"Subset for period_id {current_period_id}, frame_id {current_frame_id} "
+                #             f"(looking ahead {window} frames) is empty. "
+                #             "Cannot determine ball ownership change."
+                #         )
+                        
+                #     return subset['ball_owning_team_id'].nunique() > 1
+                def check_pressing_success(row, event_df):
+                    possession_gained_events = ['Aerial Control', 'Duels', 'Interceptions', 'Crosses','Crossess Received',
+                                            'Passes', 'Passes Received', 'Recoveries', 'Shots & Goals'] 
                     
-                    # frame_id 차이가 50 프레임 이상인 경우 새로운 시퀀스로 판단 (즉, 연속된 pressed 행이 아닐 경우)
-                    pressed_df['frame_diff'] = pressed_df['frame_id'].diff()
-                    pressed_df['sequence_id'] = (pressed_df['frame_diff'] > 50).cumsum()
-                    
-                    # 각 시퀀스별 마지막 frame을 기준으로 X와 Y를 설정하기 위해 마지막 frame 정보를 구함
-                    first_frames = pressed_df.groupby('sequence_id', as_index=False)[['period_id', 'frame_id', 'pressing_player']].first()
-                    
-                    # 각 마지막 frame에 대해, 이후 125/150 frame 내에 ball_owning_team의 값이 변경되었는지 체크하여 label(Y)을 설정
-                    def check_change(row, window=150):
-                        current_period_id = row['period_id']
-                        current_frame_id = row['frame_id']
+                    if row['team_id'] == teams_dict['Home']['tID'].unique()[0]:
+                        pressing_team = teams_dict['Away']['tID'].unique()[0]
 
-                        condition = (
-                            (total_df['period_id'] == current_period_id) &
-                            (total_df['frame_id'] >= current_frame_id) &
-                            (total_df['frame_id'] < current_frame_id + window)
-                        )
-                        subset = total_df[condition]
+                    elif row['team_id'] == teams_dict['Away']['tID'].unique()[0]:
+                        pressing_team = teams_dict['Home']['tID'].unique()[0]
 
-                        if subset.empty:
-                            raise ValueError(
-                                f"Subset for period_id {current_period_id}, frame_id {current_frame_id} "
-                                f"(looking ahead {window} frames) is empty. "
-                                "Cannot determine ball ownership change."
-                            )
-                            
-                        return subset['ball_owning_team_id'].nunique() > 1
+                    check_timegap = pd.Timedelta(seconds=5)
+                    window_events = event_df[(event_df['event_time'] >= row['timestamp']) & (event_df['event_time'] <= row['timestamp'] + check_timegap)]
+                    event_teams = window_events['team_name'].unique()
+                    event_team_ids = [TEAMNAME2ID[x] for x in event_teams]
 
-                    
-                    first_frames['ball_ownership_changed'] = first_frames.apply(check_change, axis=1, window=150)
-                    
-                    first_frames_list.append(first_frames)
+                    if pressing_team in event_team_ids:
+                        pressing_team_events = window_events[window_events['team_name'] == TEAMID2NAME[pressing_team]]
+                        for _, row in pressing_team_events.iterrows():
+                            if row['events_name'][0] in possession_gained_events:
+                                if row['events_name'][0] in ["Interceptions", "Crosses", 'Crossess Received', "Recoveries", "Shots & Goals"]:
+                                    return True
+                                else:
+                                    result = row['events'][0].get('property', None)
+                                    if result == 'Succeeded' or result == "Tackle Succeeded: No Possession":
+                                        return True
+                        return False
+                    else:
+                        return False
 
-                    for _, row in tqdm(first_frames.iterrows(), desc= "Get Samples", miniters=len(first_frames)//10):
+                # first_frames['ball_ownership_changed'] = first_frames.apply(check_change, axis=1, window=150)
+                first_frames['ball_ownership_changed'] = first_frames.apply(check_pressing_success, axis=1, event_df=event_df)
+                
+                first_frames_list.append(first_frames)
+
+                for _, row in tqdm(first_frames.iterrows(), desc= "Get Samples", miniters=len(first_frames)//10):
+                    try:
                         period_id = row['period_id']
                         frame_id = row['frame_id']
                         label = int(row['ball_ownership_changed'])
                         pressing_player = row['pressing_player']
                         X_slice = total_df[(total_df['period_id'] == period_id) & (total_df['frame_id'].isin(range(frame_id - self.sequence_length, frame_id)))].copy()
+                        
+                        # If slice data doesn't have immediately preceding data, continue. (Data Problem)
                         # Always press left -> right
                         # If pressed players team is home, flip
                         if X_slice.loc[(X_slice['frame_id']==frame_id-1) & (X_slice['is_ball_carrier']==True)]['team_id'].iloc[0] == match_dict['teams']['Home']['tID'].iloc[0]:
@@ -266,167 +329,25 @@ class PressingSequenceDataset(Dataset):
                         x_tensor = x_tensor.reshape(self.sequence_length, num_agents, len(self.feature_cols))
                         y_tensor = torch.tensor(label, dtype=torch.long)
                         
+                        # Debug (Start)
+                        if x_tensor.isnan().any():
+                            print("Find Nan", match_id, period_id, frame_id)
+                        # Debug (End)
                         all_features_seqs.append(x_tensor)
                         all_pressintensity_seqs.append(pressing_intensity_tensor)
                         all_labels.append(y_tensor)
                         all_presser_ids.append(pressing_player)    
                         all_agent_orders.append(agents_order)
-
-                    self.features_seqs = all_features_seqs
-                    self.pressintensity_seqs = all_pressintensity_seqs
-                    self.labels = all_labels
-                    self.presser_ids = all_presser_ids
-                    self.agent_orders = all_agent_orders
-                except Exception as e:
-                    print(f"Match ID : {match_id} | {e}")
-
-
-        # for match_id in self.match_id_lst:
-        #     print(f"Loading match_id: {match_id}")
-        #     kloppy_dataset = sportec.load_open_tracking_data(
-        #         match_id=match_id, coordinates=coordinates
-        #     )
-        #     home_team, away_team = kloppy_dataset.metadata.teams
-        #     dataset = KloppyPolarsDataset(kloppy_dataset=kloppy_dataset, orient_ball_owning=False)
-        #     model = CustomPressingIntensity(dataset=dataset)
-        #     if os.path.exists(f"{self.data_path}/{match_id}.pkl"):
-        #         with open(f"{self.data_path}/{match_id}.pkl", "rb") as f:
-        #             pressing_output_df = pickle.load(f)
-        #     else:
-        #         model.fit(
-        #             method="teams",
-        #             ball_method="max",
-        #             orient="home_away",
-        #             speed_threshold=2.0,
-        #         )
-        #         pressing_output_df = model.output
-
-        #     total_df = model.dataset.to_pandas()
-        #     total_df = pd.merge(total_df, pressing_output_df, on=['game_id', 'period_id', 'timestamp', 'frame_id'], how='left')
-            
-        #      # Normalize coordinate directions
-        #     total_df = self._normalize_coordinate_direction(total_df, home_team.team_id)
-        #     total_dict[match_id] = total_df
-            
-        #     # ball carrier에 대해 pressing intensity가 0.7보다 큰 경우 pressed_df 구성
-        #     pressed_dict = {}
-        #     ball_carrier_df = total_df[total_df['is_ball_carrier'] == True].copy()
-        #     ball_carrier_df.sort_values('frame_id', inplace=True)
-        #     for idx, row in tqdm(ball_carrier_df.iterrows(), desc= "Get Pressing Intensity"):
-        #         if len(np.where(row['rows'] == row['id'])[0]) != 0:
-        #             pressed_axis = 'rows'
-        #             presser_axis = 'columns'
-        #             id_loc = np.where(row[pressed_axis] == row['id'])[0]
-        #             # 다중 list nested 구조로 되어 있을 수 있으므로 tolist()를 두 번 적용
-        #             pressing_values = row['probability_to_intercept'][id_loc].tolist()[0].tolist()
-        #         elif len(np.where(row['columns'] == row['id'])[0]) != 0:
-        #             pressed_axis = 'columns'
-        #             presser_axis = 'rows'
-        #             id_loc = np.where(row[pressed_axis] == row['id'])[0]
-        #             pressing_values = [x[id_loc] for x in row['probability_to_intercept']]
-        #         else:
-        #             continue
-        #         if max(pressing_values) > 0.7:
-        #             pressed_dict[idx] = {}
-        #             pressed_dict[idx]['pressing_value'] = max(pressing_values)
-        #             max_idx = pressing_values.index(max(pressing_values))
-        #             pressed_dict[idx]['pressing_player'] = row[presser_axis][max_idx]
-        #     pressed_df = ball_carrier_df.loc[list(pressed_dict.keys())].copy()
-        #     pressed_df['pressing_values'] = [d['pressing_value'] for d in pressed_dict.values()]
-        #     pressed_df['pressing_player'] = [d.get('pressing_player') for d in pressed_dict.values()]
-            
-        #     # frame_id 차이가 50 프레임 이상인 경우 새로운 시퀀스로 판단 (즉, 연속된 pressed 행이 아닐 경우)
-        #     pressed_df['frame_diff'] = pressed_df['frame_id'].diff()
-        #     pressed_df['sequence_id'] = (pressed_df['frame_diff'] > 50).cumsum()
-            
-        #     # 각 시퀀스별 마지막 frame을 기준으로 X와 Y를 설정하기 위해 마지막 frame 정보를 구함
-        #     first_frames = pressed_df.groupby('sequence_id', as_index=False)[['frame_id', 'pressing_player']].first()
-            
-        #     # 각 마지막 frame에 대해, 이후 125 frame 내에 ball_owning_team의 값이 변경되었는지 체크하여 label(Y)을 설정
-        #     def check_change(frame_id, window=125):
-        #         subset = total_df[(total_df['frame_id'] >= frame_id) & (total_df['frame_id'] < frame_id + window)]
-        #         return subset['ball_owning_team_id'].nunique() > 1
-        #     first_frames['ball_ownership_changed'] = first_frames['frame_id'].apply(check_change)
-            
-        #     first_frames_list.append(first_frames)
-
-        #     for _, row in tqdm(first_frames.iterrows(), desc= "Get Samples"):
-        #         frame_id = row['frame_id']
-        #         label = int(row['ball_ownership_changed'])
-        #         pressing_player = row['pressing_player']
-        #         X_slice = total_df[total_df['frame_id'].isin(range(frame_id - self.sequence_length+1, frame_id+1))].copy()
-        #         # Always press left -> right
-        #         # If pressed players team is home, flip
-        #         if X_slice.loc[(X_slice['frame_id']==frame_id) & (X_slice['is_ball_carrier']==True)]['team_id'].iloc[0] == home_team.team_id:
-        #             for col in self.cols_to_flip:
-        #                 X_slice.loc[:, col] = -X_slice.loc[:, col]
-
-        #         agents_rows = X_slice[pd.isna(X_slice['rows'])==False]['rows'].values[0] # Home team
-        #         agents_cols = X_slice[pd.isna(X_slice['columns'])==False]['columns'].values[0] #Away team
-                
-        #         agents_order = agents_rows.tolist() + agents_cols.tolist()
-                
-        #         # Ensure the player IDs are consistent and match num_agents (23 players)
-        #         num_unique_agents = X_slice['id'].nunique()
-        #         frame_lst = X_slice['frame_id'].unique()
-        #         if num_unique_agents < num_agents:
-        #             # Find the missing players
-        #             num_missing_agents = num_agents - num_unique_agents
-                
-        #             # Add missing player rows with zero values for each frame in X_slice
-        #             missing_rows = []
-        #             for missing_player in range(num_missing_agents):
-        #                 for frame in frame_lst:
-        #                     missing_row = {col: 0 for col in X_slice.columns}  # Fill all columns with 0
-        #                     missing_row['id'] = f"Missing_{missing_player}"  # Set the 'id' to the missing player's id
-        #                     missing_row['frame_id'] = frame  # Set the frame_id for the current frame in the sequence
-        #                     missing_rows.append(missing_row)
-        #                 agents_order.append(f"Missing_{missing_player}") 
-
-        #             # Create a DataFrame for the missing rows and append to the slice
-        #             missing_df = pd.DataFrame(missing_rows)
-        #             X_slice = pd.concat([X_slice, missing_df], ignore_index=True)
-                
-        #         agents_order.append('ball')
-
-        #         X_slice.loc[:, 'id'] = pd.Categorical(X_slice['id'], categories=agents_order, ordered=True)
-        #         # Sort the players by their ID to maintain a consistent order
-        #         X_slice = X_slice.sort_values(by=['frame_id', 'id'])
-        #         if len(frame_lst) < self.sequence_length:
-        #             pad_len = self.sequence_length - len(X_slice['frame_id'].unique())
-        #             pad_tensor = torch.zeros(pad_len * num_agents, len(self.feature_cols))
-        #             x_tensor = torch.tensor(X_slice[self.feature_cols].values, dtype=torch.float32)
-        #             x_tensor = torch.cat([pad_tensor, x_tensor], dim=0)
-        #             X_slice_pressing = X_slice[X_slice['is_ball_carrier']==True]['probability_to_intercept']
-        #             X_slice_pressing = X_slice_pressing[pd.isna(X_slice_pressing)==False]
-        #             pressing_pad_len = self.sequence_length - len(X_slice_pressing)
-        #             pressing_intensity_tensor = torch.tensor(np.stack(X_slice_pressing.map(lambda x: np.stack(x)).values), dtype=torch.float32)
-        #             pad_pressing_tensor = torch.zeros(pressing_pad_len, pressing_intensity_tensor.shape[1], pressing_intensity_tensor.shape[2])
-        #             pressing_intensity_tensor = torch.cat([pad_pressing_tensor, pressing_intensity_tensor], dim=0)
-        #         else:
-        #             x_tensor = torch.tensor(X_slice[self.feature_cols].values, dtype=torch.float32)
-        #             X_slice_pressing = X_slice[X_slice['is_ball_carrier']==True]['probability_to_intercept']
-        #             X_slice_pressing = X_slice_pressing[pd.isna(X_slice_pressing)==False]
-        #             pressing_pad_len = self.sequence_length - len(X_slice_pressing)
-        #             pressing_intensity_tensor = torch.tensor(np.stack(X_slice_pressing.map(lambda x: np.stack(x)).values), dtype=torch.float32)
-        #             if pressing_pad_len > 0:
-        #                 pad_pressing_tensor = torch.zeros(pressing_pad_len, pressing_intensity_tensor.shape[1], pressing_intensity_tensor.shape[2])
-        #                 pressing_intensity_tensor = torch.cat([pad_pressing_tensor, pressing_intensity_tensor], dim=0)    
-                    
-        #         x_tensor = x_tensor.reshape(self.sequence_length, num_agents, len(self.feature_cols))
-        #         y_tensor = torch.tensor(label, dtype=torch.long)
-                
-        #         all_features_seqs.append(x_tensor)
-        #         all_pressintensity_seqs.append(pressing_intensity_tensor)
-        #         all_labels.append(y_tensor)
-        #         all_presser_ids.append(pressing_player)    
-        #         all_agent_orders.append(agents_order)
-
-        # self.features_seqs = all_features_seqs
-        # self.pressintensity_seqs = all_pressintensity_seqs
-        # self.labels = all_labels
-        # self.presser_ids = all_presser_ids
-        # self.agent_orders = all_agent_orders
+                    except Exception as e:
+                        period_id = row['period_id']
+                        frame_id = row['frame_id']
+                        print(f"Error | Match ID : {match_id} | Period {period_id} | Frame ID {frame_id} : {e}")
+                        continue
+                self.features_seqs = all_features_seqs
+                self.pressintensity_seqs = all_pressintensity_seqs
+                self.labels = all_labels
+                self.presser_ids = all_presser_ids
+                self.agent_orders = all_agent_orders
 
     def _infer_feature_cols(self):
         ignore = ['game_id', 'period_id', 'timestamp', 'ball_owning_team_id']
@@ -526,6 +447,7 @@ class ToSoccerMapTensor:
 
         x_tensor = sample['features']
         num_seqs = x_tensor.shape[0]
+        num_seqs = 30
         matrix = np.zeros((self.num_features * num_seqs, self.y_bins, self.x_bins))
         press_intensity = sample['pressing_intensity']
         target = sample['label']
@@ -536,7 +458,8 @@ class ToSoccerMapTensor:
         away_team_ids = agents_order[11:22]
 
         for i in range(num_seqs):
-            x_feat = x_tensor[i]
+            x_feat = x_tensor[120+i]
+            # x_feat = x_tensor[-1]
 
             if presser_id in home_team_ids:
                 pressing_indices = home_indices
@@ -677,8 +600,8 @@ class SoccerMapInputDataset(Dataset): # Renamed from PressingFrameDataset
         if idx >= len(self.loaded_data):
             raise IndexError("Index out of bounds")
         
-        spaital_map, label = self.transform(self.loaded_data[idx])
-        return spaital_map, label
+        spatial_map, label = self.transform(self.loaded_data[idx])
+        return spatial_map, label
 
 class exPressInputDataset(Dataset):
     def __init__(self, pickled_dataset_path):
@@ -692,11 +615,96 @@ class exPressInputDataset(Dataset):
             print(f"Error: Dataset file not found at {pickled_dataset_path}")
         except Exception as e:
             print(f"Error loading pickled dataset: {e}")
+
+        # # Normalization
+        # num_features = self.loaded_data[0]['features'].shape[2]
+
+        # # 각 피처 차원별 최솟값과 최댓값을 저장할 텐서를 초기화합니다.
+        # # shape: [NumFeatures]
+        # current_min_vals = torch.full((num_features,), float('inf'), dtype=torch.float32)
+        # current_max_vals = torch.full((num_features,), float('-inf'), dtype=torch.float32)
     
+        # for idx in range(len(self.loaded_data)):
+        #     features_tensor = self.loaded_data[0]['features']
+        #     min_in_tensor = torch.min(torch.min(features_tensor, dim=0).values, dim=0).values
+        #     max_in_tensor = torch.max(torch.max(features_tensor, dim=0).values, dim=0).values
+
+        #     current_min_vals = torch.minimum(current_min_vals, min_in_tensor)
+        #     current_max_vals = torch.maximum(current_max_vals, max_in_tensor)
+
+        # self.feature_min_vals = current_min_vals
+        # self.feature_max_vals = current_max_vals
+        
+        # # __getitem__에서 브로드캐스팅을 위해 shape 변경: [1, 1, NumFeatures]
+        # self.min_vals_bcast = self.feature_min_vals.reshape(1, 1, -1)
+        # self.max_vals_bcast = self.feature_max_vals.reshape(1, 1, -1)
+        
+        # self.feature_ranges = self.max_vals_bcast - self.min_vals_bcast
+        # # 범위가 0인 경우 (피처 값이 상수인 경우) 0으로 나누는 것을 방지합니다.
+        # # 이 경우 정규화된 값은 0이 됩니다. ( (X - min) / 1 = 0 )
+        # self.feature_ranges[self.feature_ranges == 0] = 1.0 
+
     def __len__(self):
         """Returns the total number of samples."""
         return len(self.loaded_data)
 
+    def _normalize_features(self, features):
+        # prepare min and denom tensors [A, F]
+        T, A, F = features.shape
+        
+        # boolean mask: last agent is ball
+        is_ball = torch.zeros(A, dtype=torch.bool, device=features.device)
+        is_ball[-1] = True
+
+        mins = torch.zeros(A, F, device=features.device)
+        maxs = torch.zeros(A, F, device=features.device)
+
+        # 0: x, 1: y, 2: vx, 3: vy, 4: v, 5: ax, 6: ay, 7: a
+        # x, y
+        mins[:, 0] = PITCH_X_MIN
+        maxs[:, 0] = PITCH_X_MAX
+        mins[:, 1] = PITCH_Y_MIN
+        maxs[:, 1] = PITCH_Y_MAX
+
+        # vx, vy
+        player_v = MAX_PLAYER_SPEED
+        ball_v   = MAX_BALL_SPEED
+        vmaxs = torch.where(is_ball, ball_v, player_v)
+        mins[:, 2] = -vmaxs
+        maxs[:, 2] =  vmaxs
+        mins[:, 3] = -vmaxs
+        maxs[:, 3] =  vmaxs
+
+        # v (speed magnitude)
+        mins[:, 4] = 0.0
+        maxs[:, 4] = vmaxs
+
+        # ax, ay
+        player_a = MAX_PLAYER_ACCELERATION
+        ball_a   = MAX_BALL_ACCELERATION
+        amaxs = torch.where(is_ball, ball_a, player_a)
+        mins[:, 5] = -amaxs
+        maxs[:, 5] =  amaxs
+        mins[:, 6] = -amaxs
+        maxs[:, 6] =  amaxs
+
+        # a (acceleration magnitude)
+        mins[:, 7] = 0.0
+        maxs[:, 7] = amaxs
+
+        # reshape to [1, A, F] for broadcasting over time
+        mins = mins.unsqueeze(0)
+        maxs = maxs.unsqueeze(0)
+
+        # reshape to [1, A, F] for broadcasting over time
+        mins = mins.unsqueeze(0)
+        maxs = maxs.unsqueeze(0)
+
+        # min-max normalize and clamp to [0,1]
+        norm_feats = (features - mins) / (maxs - mins)
+        norm_feats = torch.clamp(norm_feats, 0.0, 1.0)
+        return features
+    
     def __getitem__(self, idx):
         """
         Returns a dictionary containing sequence data for the sample at the given index.
@@ -705,6 +713,8 @@ class exPressInputDataset(Dataset):
         if self.loaded_data is None or idx >= len(self.loaded_data):
             raise IndexError("Index out of bounds or data not loaded")
         features = self.loaded_data[idx]['features']
+        features = self._normalize_features(features)
+
         pressing_intensity = self.loaded_data[idx]['pressing_intensity']
         _, cur_players1, cur_players2 = pressing_intensity.shape
         num_team_players = 11
@@ -713,17 +723,28 @@ class exPressInputDataset(Dataset):
             pad_d1 = num_team_players - cur_players1
             # Pad second to last dimension (bottom)
             pressing_intensity = F.pad(pressing_intensity, (0, 0, 0, pad_d1), mode='constant', value=0)
-        elif cur_players2 != num_team_players:
+        if cur_players2 != num_team_players:
             pad_d2 = num_team_players - cur_players2
             # Pad last dimension (right side)
             pressing_intensity = F.pad(pressing_intensity, (0, pad_d2), mode='constant', value=0)
 
+        #  # --- 'features'에 Min-Max 정규화 적용 ---
+        # normalized_features = features.float() # 기본값은 원본 (정규화 파라미터가 없는 경우)
+        # if self.feature_min_vals is not None and self.feature_max_vals is not None:
+        #     # 정규화: (X - X_min) / (X_max - X_min)
+        #     # self.feature_ranges가 0인 경우 1.0으로 설정했으므로, 해당 피처는 (X - X_min) / 1.0 = 0 이 됩니다 (X==X_min 가정).
+        #     normalized_features = (features.float() - self.min_vals_bcast) / (self.feature_ranges + 1e-8) # 1e-8은 매우 작은 범위에 대한 안정성 추가
+        #     # 값의 범위를 [0, 1]로 클램핑할 수도 있습니다 (정밀도 문제 등으로 약간 벗어날 수 있음).
+        #     # normalized_features = torch.clamp(normalized_features, 0, 1)
+        # # --- 정규화 끝 ---
+        
         label = self.loaded_data[idx]['label']
         presser_id = self.loaded_data[idx]['presser_id']
         agent_order = self.loaded_data[idx]['agent_order']
 
         return {
                 'features': features.float(),         # Shape: [T, A, F] e.g., [125, 23, 8]
+                # 'features': normalized_features.float(),         # Shape: [T, A, F] e.g., [125, 23, 8]
                 'pressing_intensity': pressing_intensity.float(), # Shape: [T, 11, 11]
                 'label': label.float(),             # Shape: [1] or scalar
                 'presser_id': presser_id,           # String
@@ -734,11 +755,15 @@ class exPressInputDataset(Dataset):
 if __name__ == "__main__":
     data_path = "/data/MHL/bepro/processed"
     save_path = "/data/MHL/pressing-intensity"
-    train_dataset = PressingSequenceDataset(data_path, match_id_lst=['J03WQQ', 'J03WMX', 'J03WOH', 'J03WN1', 'J03WOY', 'J03WR9'])
-    test_dataset = PressingSequenceDataset(data_path, match_id_lst=['J03WPY'])
-    with open(f"{data_path}/train_dataset.pkl", "wb") as f:
+    os.makedirs(save_path, exist_ok=True)
+    match_id_lst = os.listdir(data_path)
+    train_match_id_lst = match_id_lst[:-4]
+    test_match_id_lst = match_id_lst[-4:]
+    train_dataset = PressingSequenceDataset(data_path, match_id_lst=train_match_id_lst)
+    test_dataset = PressingSequenceDataset(data_path, match_id_lst=test_match_id_lst)
+    with open(f"{save_path}/train_dataset.pkl", "wb") as f:
         pickle.dump(train_dataset, f)
-    with open(f"{data_path}/test_dataset.pkl", "wb") as f:
+    with open(f"{save_path}/test_dataset.pkl", "wb") as f:
         pickle.dump(test_dataset, f)
     print("Done")
     

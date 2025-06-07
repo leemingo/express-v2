@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, random_split
 
 from datasets import PressingSequenceDataset, SoccerMapInputDataset, exPressInputDataset # Assuming dataset.py contains this
 from components.base import BaseComponent
-from model import PytorchSoccerMapModel, TemporalSoccerMapModel # Assuming model.py contains this
+from model import PytorchSoccerMapModel, TemporalSoccerMapModel, exPressModel # Assuming model.py contains this
 
 class SoccerMapComponent(BaseComponent):
     """Handles SoccerMap model training and testing."""
@@ -80,8 +80,8 @@ class SoccerMapComponent(BaseComponent):
         """Initializes the Lightning model."""
         print(f"Initializing model type: {self.args.model_type}")
         if self.args.model_type == 'soccermap':
-            # self.model = PytorchSoccerMapModel(self.model_cfg, self.optimizer_cfg)
-            self.model = TemporalSoccerMapModel(self.model_cfg, self.optimizer_cfg)
+            self.model = PytorchSoccerMapModel(self.model_cfg, self.optimizer_cfg)
+            # self.model = TemporalSoccerMapModel(self.model_cfg, self.optimizer_cfg)
         else:
             print(f"Error: Model type '{self.args.model_type}' setup not implemented.")
             exit()
@@ -125,7 +125,20 @@ class exPressComponent(BaseComponent):
         
         if stage == 'fit':
             train_pkl_path = f"{self.args.root_path}/train_dataset.pkl"
-            full_train_dataset = exPressInputDataset(train_pkl_path)   
+            full_train_dataset = exPressInputDataset(train_pkl_path)
+            # Temporary (Start)
+            from torch.utils.data import Subset
+            error_lst = []
+            for i in range(len(full_train_dataset)):
+                if full_train_dataset[i]['features'].isnan().any():
+                    error_lst.append(i)
+            error_lst = set(error_lst)
+
+            all_indices = list(range(len(full_train_dataset)))
+            valid_indices = [idx for idx in all_indices if idx not in error_lst]
+            full_train_dataset = Subset(full_train_dataset, valid_indices)
+            # Temporary (End)
+
             if len(full_train_dataset) == 0: print("Loaded training dataset is empty."); exit()
 
             total_samples = len(full_train_dataset)
@@ -149,9 +162,21 @@ class exPressComponent(BaseComponent):
                 self.val_loader = None
 
         elif stage == 'test':
+
             test_pkl_path = f"{self.args.root_path}/test_dataset.pkl"
             test_dataset = exPressInputDataset(test_pkl_path)   
+            # Temporary (Start)
+            from torch.utils.data import Subset
+            error_lst = []
+            for i in range(len(test_dataset)):
+                if test_dataset[i]['features'].isnan().any():
+                    error_lst.append(i)
+            error_lst = set(error_lst)
 
+            all_indices = list(range(len(test_dataset)))
+            valid_indices = [idx for idx in all_indices if idx not in error_lst]
+            test_dataset = Subset(test_dataset, valid_indices)
+            # Temporary (End)
             if len(test_dataset) > 0:
                 self.test_loader = DataLoader(test_dataset, shuffle=False, **common_loader_args)
                 print(f"Test loader created with {len(test_dataset)} samples.")

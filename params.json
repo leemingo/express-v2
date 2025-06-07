@@ -15,9 +15,9 @@
 
     "soccermap": {
         "DataConfig": {
-            "batch_size": 16,
+            "batch_size": 32,
             "val_split_ratio": 0.2,
-            "num_workers": 4,
+            "num_workers": 1,
             "pin_memory": true
         },
         "TrainerConfig": {
@@ -34,7 +34,7 @@
             }
         },
         "ModelConfig": {
-            "in_channels": 13
+            "in_channels": 390
         },
 
         "EarlyStopConfig": {
@@ -94,7 +94,7 @@
     },
     "exPress": {
         "DataConfig": {
-            "batch_size": 16,
+            "batch_size": 32,
             "val_split_ratio": 0.2,
             "num_workers": 4,
             "pin_memory": true
@@ -120,12 +120,12 @@
             "lstm_hidden_dim": 64,
             "lstm_dropout": 0.4,
             "lstm_bidirectional": true,
-            "use_pressing_features": true
+            "use_pressing_features": false
         },
 
         "EarlyStopConfig": {
             "monitor_metric": "val_loss",
-            "patience": 20,
+            "patience": 50,
             "min_delta": 1e-3,
             "mode": "min",
             "strict": false,

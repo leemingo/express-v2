@@ -304,7 +304,7 @@ def load_bepro(data_path):
 
 
 if __name__=="__main__":
-    source = 'dfl-confidential'
+    source = 'bepro'
     if source == 'dfl-spoho':
         load_dfl_spoho("/data/MHL/dfl-spoho/processed")
     elif source == 'dfl-confidential':

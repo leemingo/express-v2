@@ -60,3 +60,31 @@ TEAM_NAME = {'FC서울' : 'FC Seoul',
     '제주SK FC' : 'Jeju SK FC',
     '포항 스틸러스' : 'Pohang Steelers'
     }
+
+TEAMNAME2ID = {'Gwangju FC': '4648',
+    'Pohang Steelers': '4639',
+    'Gimcheon Sangmu': '2353',
+    'Jeonbuk Hyundai Motors': '4640',
+    'Jeju SK FC': '4641',
+    'Daegu FC': '4644',
+    'Incheon United': '4646',
+    'FC Seoul': '316',
+    'Daejeon Hana Citizen': '4657',
+    'Suwon FC': '4220',
+    'Gangwon FC': '4643',
+    'Ulsan HD FC': '2354'
+    }
+
+TEAMID2NAME = {'4648': 'Gwangju FC',
+    '4639': 'Pohang Steelers',
+    '2353': 'Gimcheon Sangmu',
+    '4640': 'Jeonbuk Hyundai Motors',
+    '4641': 'Jeju SK FC',
+    '4644': 'Daegu FC',
+    '4646': 'Incheon United',
+    '316': 'FC Seoul',
+    '4657': 'Daejeon Hana Citizen',
+    '4220': 'Suwon FC',
+    '4643': 'Gangwon FC',
+    '2354': 'Ulsan HD FC'
+    }

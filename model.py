@@ -13,7 +13,7 @@ from torch_geometric.nn import GCNConv, global_mean_pool
 from torch_geometric.utils import dense_to_sparse
 
 from torchmetrics.classification import BinaryAccuracy, BinaryAUROC
-
+torch.autograd.set_detect_anomaly(True)
 
 # --- Constants and Configuration ---
 H, W = 68, 104  # Grid dimensions (Height, Width)
@@ -241,15 +241,33 @@ class SoccerMap(nn.Module):
         self.features_x8 = _FeatureExtractionLayer(64)
         self.features_x16 = _FeatureExtractionLayer(64)
 
-        
+        # Layers for down and upscaling and merging scales
+        # self.up_x2 = _UpSamplingLayer()
+        # self.up_x4 = _UpSamplingLayer()
+
         # Layers for down and upscaling and merging scales
         self.down_x2 = nn.MaxPool2d(kernel_size=(2, 2))
         self.down_x4 = nn.MaxPool2d(kernel_size=(2, 2))
         self.down_x8 = nn.MaxPool2d(kernel_size=(2, 2))
         self.down_x16 = nn.MaxPool2d(kernel_size=(2, 2))
         
+        # self.fusion_x2_x4 = _FusionLayer()
+        # self.fusion_x1_x2 = _FusionLayer()
+
+
         # Prediction layers at each scale
+        # self.prediction_x1 = _PredictionLayer()
+        # self.prediction_x2 = _PredictionLayer()
+        # self.prediction_x4 = _PredictionLayer()
+        # self.prediction_x8 = _PredictionLayer()
         self.prediction_x16 = _PredictionLayer()
+
+        # output layer: binary classification
+        self.output_layer = nn.Sequential(
+            nn.Flatten(),  # Flatten to (batch_size, num_features)
+            nn.Linear((68 // 16) * (104 // 16), 1),  # Linear layer to output a single value
+        )
+
 
     def forward(self, x):
         # Feature extraction
@@ -263,7 +281,9 @@ class SoccerMap(nn.Module):
         pred_x16 = self.prediction_x16(f_x16) #[B*T, 1, H//16, W//16]
         
         # The activation function depends on the problem
-        return pred_x16
+        return self.output_layer(pred_x16) # For Base SoccerMap
+        # return pred_x16 # For TemporalSoccerMap
+        
 
 
 
@@ -349,11 +369,12 @@ class PytorchSoccerMapModel(pl.LightningModule):
         self.save_hyperparameters()
 
         self.model = SoccerMap(model_config=model_config)
-        self.sigmoid = nn.Sigmoid()
+        # self.sigmoid = nn.Sigmoid()
 
         # loss function
         # self.criterion = torch.nn.BCELoss()
-        self.criterion = FocalLoss()
+        self.criterion = nn.BCEWithLogitsLoss()
+        # self.criterion = FocalLoss()
 
         self.optimizer_params = optimizer_params
 
@@ -366,21 +387,23 @@ class PytorchSoccerMapModel(pl.LightningModule):
 
     def forward(self, x: torch.Tensor):
         x = self.model(x)
-        x = self.sigmoid(x)
+        # x = self.sigmoid(x)
 
         return x
 
+
     def step(self, batch: Any):
         x, y = batch
-        y_hat = self.forward(x)
-
+        logits = self.forward(x)
+        y = y.float().view_as(logits)
         # x, mask, y = batch
         # surface = self.forward(x)
         # y_hat = pixel(surface, mask)
 
-        loss = self.criterion(y_hat, y)
+        loss = self.criterion(logits, y)
+        preds_prob = torch.sigmoid(logits)
 
-        return loss, y_hat, y
+        return loss, preds_prob, y
 
     def training_step(self, batch: Any, batch_idx: int):
         loss, preds, targets = self.step(batch)
@@ -466,13 +489,14 @@ class TemporalSoccerMapModel(pl.LightningModule):
         )
         self.temporal_output_layer = nn.Sequential(
             nn.Flatten(),  # Flatten to (batch_size, num_features)
-            nn.Linear(125, 1),  # Linear layer to output a single value
+            nn.Linear(150, 1),  # Linear layer to output a single value
         )
 
         self.sigmoid = nn.Sigmoid()
 
         # loss function
-        self.criterion = torch.nn.BCELoss()
+        # self.criterion = torch.nn.BCELoss()
+        self.criterion = nn.BCEWithLogitsLoss()
         # self.criterion = FocalLoss()
 
         self.optimizer_params = optimizer_params
@@ -486,15 +510,15 @@ class TemporalSoccerMapModel(pl.LightningModule):
 
     def forward(self, x: torch.Tensor):
         b, tc, h, w = x.shape
-        x = x.view(b*125, 13, h, w)
-        out = self.spatial_model(x) #[B*125, 1, 4, 6]
-        out = out.view(b*125, -1) #[B*125, 4*6]
-        out = out.view(b, 125, -1) #[B, 125, 4*6]
+        x = x.view(b*150, 13, h, w)
+        out = self.spatial_model(x) #[B*150, 1, 4, 6]
+        out = out.view(b*150, -1) #[B*150, 4*6]
+        out = out.view(b, 150, -1) #[B, 150, 4*6]
         out, (h_n, c_n) = self.temporal_model(out) # out: [B, T, 2 * 128] h_n: [3*2, B, D]
         out = out[:, -1, :] #[B, 2*128]
         out = self.spatial_output_layer(out) #[B, 1]
         # out = self.temporal_output_layer(out) #[B, 1]
-        out = self.sigmoid(out)
+        # out = self.sigmoid(out)
 
         return out
 
@@ -502,15 +526,16 @@ class TemporalSoccerMapModel(pl.LightningModule):
         x, y = batch
         x = x.to("cuda")
         y = y.to("cuda")
-        y_hat = self.forward(x)
-
+        logits = self.forward(x)
+        y = y.float().view_as(logits)
         # x, mask, y = batch
         # surface = self.forward(x)
         # y_hat = pixel(surface, mask)
 
-        loss = self.criterion(y_hat, y)
+        loss = self.criterion(logits, y)
+        preds_prob = torch.sigmoid(logits)
 
-        return loss, y_hat, y
+        return loss, preds_prob, y
 
     def training_step(self, batch: Any, batch_idx: int):
         loss, preds, targets = self.step(batch)
@@ -603,6 +628,7 @@ class STLSTMGNN(nn.Module):
         self.classifier = nn.Linear(self.gnn_hidden_dim, 1)
 
     def forward(self, batch: Dict) -> torch.Tensor:
+        batch['features'] = batch['features'][:, -60:, ...]
         B, T, A, F_in = batch['features'].shape
         device = batch['features'].device
 
@@ -736,3 +762,4 @@ class exPressModel(pl.LightningModule):
         """
 
         return torch.optim.Adam(self.parameters(), **self.optimizer_params["optimizer_params"])
+
