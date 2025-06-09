@@ -212,7 +212,55 @@ def _calculate_kinematics(df: pd.DataFrame, smoothing_params: dict, max_speed: f
     return df_out
 
 
-def rescale_pitch(tracking_df, meta_data):\
+def resample_tracking_dataframe(tracking_df, target_hz):
+    resample_freq_ms = int(1000 / target_hz)
+    resample_freq_str = f'{resample_freq_ms}ms'
+    
+    period_list = []
+    for period_id in tracking_df['period_id'].unique():
+        period_df = tracking_df[tracking_df['period_id'] == period_id]
+
+        min_timestamp = period_df['timestamp'].min()
+        max_timestamp = period_df['timestamp'].max()
+        global_original_index = pd.to_timedelta(sorted(period_df['timestamp'].unique()))
+        global_target_index = pd.timedelta_range(start=min_timestamp, end=max_timestamp, freq=resample_freq_str)
+
+        grouped = period_df.groupby('id')
+        resampled_list = []
+
+        for agent_id, agent_group in grouped:
+            group_df = agent_group.copy().set_index('timestamp')
+            if group_df.index.has_duplicates:
+                group_df = group_df.loc[~group_df.index.duplicated(keep='first')] # Some data contains duplicated coordinates for each players in the same frame.
+
+            union_index = global_original_index.union(global_target_index)
+            reindexed_group = group_df.reindex(union_index)
+
+            # Interpolation
+            interpolation_cols = ['x', 'y', 'speed']
+            reindexed_group[interpolation_cols] = reindexed_group[interpolation_cols].interpolate(method='cubic', limit_area='inside')
+            
+            # 5. 최종 결과 필터링: 보간된 결과에서 25Hz 시간대의 데이터만 선택
+            final_group = reindexed_group.reindex(global_target_index)
+
+            # 6. 범주형 데이터 채우기
+            final_group['id'] = agent_id
+            ffill_cols = [col for col in group_df.columns if col not in interpolation_cols and col != 'id']
+            final_group[ffill_cols] = final_group[ffill_cols].ffill()
+            final_group = final_group.dropna(subset=['x', 'y'])
+            resampled_list.append(final_group)
+
+        period_list += resampled_list
+
+    total_resampled_df = pd.concat(period_list).reset_index().rename(columns={'index': 'timestamp'})
+    total_resampled_df['frame_id'] = (total_resampled_df['timestamp'].astype(np.int64) // (10**9 / target_hz)).astype(int)
+    total_resampled_df = total_resampled_df.sort_values(['game_id', 'timestamp', 'period_id', 'frame_id', 'id'])
+
+    return total_resampled_df
+
+
+
+def rescale_pitch(tracking_df, meta_data):
     
     x_ori_min, x_ori_max = 0.0, meta_data['ground_width']
     y_ori_min, y_ori_max = 0.0, meta_data['ground_height']
@@ -228,7 +276,6 @@ def rescale_pitch(tracking_df, meta_data):\
     tracking_df['y'] = y_new_min + (tracking_df['y'] - y_ori_min) * scale_y
     return tracking_df
     
-
 
 
 def create_tracking_dataframe(match_path, meta_data, teams_dict):
@@ -305,16 +352,17 @@ def create_tracking_dataframe(match_path, meta_data, teams_dict):
     tracking_df['timestamp'] = pd.to_timedelta(tracking_df['timestamp'], unit='ms')
     # Rescale
     tracking_df = rescale_pitch(tracking_df, meta_data)
+    # Resample (30Hz -> 25Hz)
+    tracking_df = resample_tracking_dataframe(tracking_df, target_hz=25)
     
     # Calculate kinematics
     agent_ids_present = tracking_df['id'].unique()
-    total_tracking_df = pd.DataFrame()
+    total_tracking_list = []
     for agent_id in agent_ids_present:
         is_ball = (agent_id == 'ball')
 
         current_agent_df = tracking_df[tracking_df['id'] == agent_id].copy()
         current_agent_df['z'] = 0.0 # bepro data doesn't have z information.
-        current_agent_df = current_agent_df.drop_duplicates(subset=['period_id', 'frame_id'], keep='first') # Some data contains duplicated coordinates for each players in the same frame.
 
         # Drop rows with NaN coordinates for players
         if not is_ball:
@@ -326,11 +374,12 @@ def create_tracking_dataframe(match_path, meta_data, teams_dict):
         max_a = max_ball_acceleration if is_ball else max_player_acceleration
 
         kinematics_df = _calculate_kinematics(current_agent_df, smoothing, max_v, max_a, is_ball)
-        total_tracking_df = pd.concat([total_tracking_df, kinematics_df], axis=0, ignore_index=True)
+        total_tracking_list.append(kinematics_df)    
+    total_tracking_df = pd.concat(total_tracking_list, axis=0, ignore_index=True)
     
     # Sort final DataFrame
     total_tracking_df = total_tracking_df.sort_values(
-        by=["period_id", "timestamp", "id"], kind="mergesort"
+        by=["period_id", "timestamp", "frame_id", "id"], kind="mergesort"
     ).reset_index(drop=True)
 
     # Define final column order (example)

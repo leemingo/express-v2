@@ -697,6 +697,7 @@ class exPressModel(pl.LightningModule):
         self.model = STLSTMGNN(model_config=model_config)
         
         # self.criterion = nn.BCELoss()
+        # self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([8.0]))
         self.criterion = nn.BCEWithLogitsLoss()
 
         self.optimizer_params = optimizer_params

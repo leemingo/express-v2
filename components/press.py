@@ -122,25 +122,15 @@ class exPressComponent(BaseComponent):
             "persistent_workers": True if num_workers > 0 else False,
             # "collate_fn": collate_fn_skip_none
         }
+        train_pkl_path = f"{self.args.root_path}/train_dataset.pkl"
+        full_train_dataset = exPressInputDataset(train_pkl_path)
+        if len(full_train_dataset) == 0: print("Loaded training dataset is empty."); exit()
         
+        feature_min_val, feature_max_val = full_train_dataset.feature_min_vals, full_train_dataset.feature_max_vals,  
+        test_pkl_path = f"{self.args.root_path}/test_dataset.pkl"
+        test_dataset = exPressInputDataset(test_pkl_path, feature_min_val, feature_max_val)   
+
         if stage == 'fit':
-            train_pkl_path = f"{self.args.root_path}/train_dataset.pkl"
-            full_train_dataset = exPressInputDataset(train_pkl_path)
-            # Temporary (Start)
-            from torch.utils.data import Subset
-            error_lst = []
-            for i in range(len(full_train_dataset)):
-                if full_train_dataset[i]['features'].isnan().any():
-                    error_lst.append(i)
-            error_lst = set(error_lst)
-
-            all_indices = list(range(len(full_train_dataset)))
-            valid_indices = [idx for idx in all_indices if idx not in error_lst]
-            full_train_dataset = Subset(full_train_dataset, valid_indices)
-            # Temporary (End)
-
-            if len(full_train_dataset) == 0: print("Loaded training dataset is empty."); exit()
-
             total_samples = len(full_train_dataset)
             val_size = int(total_samples * val_split_ratio)
             train_size = total_samples - val_size
@@ -162,21 +152,6 @@ class exPressComponent(BaseComponent):
                 self.val_loader = None
 
         elif stage == 'test':
-
-            test_pkl_path = f"{self.args.root_path}/test_dataset.pkl"
-            test_dataset = exPressInputDataset(test_pkl_path)   
-            # Temporary (Start)
-            from torch.utils.data import Subset
-            error_lst = []
-            for i in range(len(test_dataset)):
-                if test_dataset[i]['features'].isnan().any():
-                    error_lst.append(i)
-            error_lst = set(error_lst)
-
-            all_indices = list(range(len(test_dataset)))
-            valid_indices = [idx for idx in all_indices if idx not in error_lst]
-            test_dataset = Subset(test_dataset, valid_indices)
-            # Temporary (End)
             if len(test_dataset) > 0:
                 self.test_loader = DataLoader(test_dataset, shuffle=False, **common_loader_args)
                 print(f"Test loader created with {len(test_dataset)} samples.")

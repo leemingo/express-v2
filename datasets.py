@@ -119,6 +119,57 @@ class PressingSequenceDataset(Dataset):
                 event_name_lst.append(val['name'])
         return event_name_lst
 
+    # 각 마지막 frame에 대해, 이후 125/150 frame 내에 ball_owning_team의 값이 변경되었는지 체크하여 label(Y)을 설정
+    def _check_change(row, total_df, window=150):
+        current_period_id = row['period_id']
+        current_frame_id = row['frame_id']
+
+        condition = (
+            (total_df['period_id'] == current_period_id) &
+            (total_df['frame_id'] >= current_frame_id) &
+            (total_df['frame_id'] < current_frame_id + window)
+        )
+        subset = total_df[condition]
+
+        if subset.empty:
+            raise ValueError(
+                f"Subset for period_id {current_period_id}, frame_id {current_frame_id} "
+                f"(looking ahead {window} frames) is empty. "
+                "Cannot determine ball ownership change."
+            )
+            
+        return subset['ball_owning_team_id'].nunique() > 1            
+    
+    def _check_pressing_success(self, row, event_df, teams_dict):
+        possession_gained_events = ['Aerial Control', 'Duels', 'Interceptions', 'Crosses','Crossess Received',
+                                'Passes', 'Passes Received', 'Recoveries', 'Shots & Goals'] 
+        
+        if row['team_id'] == teams_dict['Home']['tID'].unique()[0]:
+            pressing_team = teams_dict['Away']['tID'].unique()[0]
+
+        elif row['team_id'] == teams_dict['Away']['tID'].unique()[0]:
+            pressing_team = teams_dict['Home']['tID'].unique()[0]
+
+        check_timegap = pd.Timedelta(seconds=5)
+        window_events = event_df[(event_df['event_time'] >= row['timestamp']) & (event_df['event_time'] <= row['timestamp'] + check_timegap)]
+        event_teams = window_events['team_name'].unique()
+        event_team_ids = [TEAMNAME2ID[x] for x in event_teams]
+
+        if pressing_team in event_team_ids:
+            pressing_team_events = window_events[window_events['team_name'] == TEAMID2NAME[pressing_team]]
+            for _, row in pressing_team_events.iterrows():
+                if row['events_name'][0] in possession_gained_events:
+                    if row['events_name'][0] in ["Interceptions", "Crosses", 'Crossess Received', "Recoveries", "Shots & Goals"]:
+                        return True
+                    else:
+                        result = row['events'][0].get('property', None)
+                        if result == 'Succeeded' or result == "Tackle Succeeded: No Possession":
+                            return True
+            return False
+        else:
+            return False
+
+    
     def _load_data(self):
         total_dfs = []
         first_frames_list = []
@@ -138,6 +189,8 @@ class PressingSequenceDataset(Dataset):
                     match_dict = pickle.load(f)
                 tracking_df = match_dict['tracking_df']
                 teams_dict = match_dict['teams']
+                # Make the direction unified.
+                tracking_df = self._normalize_coordinate_direction(tracking_df, teams_dict['Home']['pID'].iloc[0])
                 event_df = match_dict['event_df']
                 # Process event dataframe.
                 event_df['events_name'] = event_df['events'].apply(self._get_event_name)
@@ -148,8 +201,7 @@ class PressingSequenceDataset(Dataset):
                     pressing_df = pickle.load(f)
 
                 total_df = pd.merge(tracking_df, pressing_df, on=['game_id', 'period_id', 'timestamp', 'frame_id'], how='left')
-                total_df = self._normalize_coordinate_direction(total_df, teams_dict['Home']['pID'].iloc[0])
-                total_df = total_df[total_df['ball_state'] != 'dead']
+                total_df = total_df[total_df['ball_state'] != 'dead'] # Need to be considered more.
                 total_dict[match_id]['tracking_df'] = total_df
                 total_dict[match_id]['event_df'] = event_df
                 total_dict[match_id]['meta_data'] = meta_data
@@ -203,59 +255,8 @@ class PressingSequenceDataset(Dataset):
 
                 # 압박하는 선수의 속도가 2.0 m/s 인 경우만 압박으로 간주
                 first_frames = first_frames[first_frames['v'] >= 2.0]
-                
-                # 각 마지막 frame에 대해, 이후 125/150 frame 내에 ball_owning_team의 값이 변경되었는지 체크하여 label(Y)을 설정
-                # def check_change(row, window=150):
-                #     current_period_id = row['period_id']
-                #     current_frame_id = row['frame_id']
-
-                #     condition = (
-                #         (total_df['period_id'] == current_period_id) &
-                #         (total_df['frame_id'] >= current_frame_id) &
-                #         (total_df['frame_id'] < current_frame_id + window)
-                #     )
-                #     subset = total_df[condition]
-
-                #     if subset.empty:
-                #         raise ValueError(
-                #             f"Subset for period_id {current_period_id}, frame_id {current_frame_id} "
-                #             f"(looking ahead {window} frames) is empty. "
-                #             "Cannot determine ball ownership change."
-                #         )
-                        
-                #     return subset['ball_owning_team_id'].nunique() > 1
-                def check_pressing_success(row, event_df):
-                    possession_gained_events = ['Aerial Control', 'Duels', 'Interceptions', 'Crosses','Crossess Received',
-                                            'Passes', 'Passes Received', 'Recoveries', 'Shots & Goals'] 
-                    
-                    if row['team_id'] == teams_dict['Home']['tID'].unique()[0]:
-                        pressing_team = teams_dict['Away']['tID'].unique()[0]
-
-                    elif row['team_id'] == teams_dict['Away']['tID'].unique()[0]:
-                        pressing_team = teams_dict['Home']['tID'].unique()[0]
-
-                    check_timegap = pd.Timedelta(seconds=5)
-                    window_events = event_df[(event_df['event_time'] >= row['timestamp']) & (event_df['event_time'] <= row['timestamp'] + check_timegap)]
-                    event_teams = window_events['team_name'].unique()
-                    event_team_ids = [TEAMNAME2ID[x] for x in event_teams]
-
-                    if pressing_team in event_team_ids:
-                        pressing_team_events = window_events[window_events['team_name'] == TEAMID2NAME[pressing_team]]
-                        for _, row in pressing_team_events.iterrows():
-                            if row['events_name'][0] in possession_gained_events:
-                                if row['events_name'][0] in ["Interceptions", "Crosses", 'Crossess Received', "Recoveries", "Shots & Goals"]:
-                                    return True
-                                else:
-                                    result = row['events'][0].get('property', None)
-                                    if result == 'Succeeded' or result == "Tackle Succeeded: No Possession":
-                                        return True
-                        return False
-                    else:
-                        return False
-
                 # first_frames['ball_ownership_changed'] = first_frames.apply(check_change, axis=1, window=150)
-                first_frames['ball_ownership_changed'] = first_frames.apply(check_pressing_success, axis=1, event_df=event_df)
-                
+                first_frames['ball_ownership_changed'] = first_frames.apply(self._check_pressing_success, axis=1, event_df=event_df, teams_dict=teams_dict)
                 first_frames_list.append(first_frames)
 
                 for _, row in tqdm(first_frames.iterrows(), desc= "Get Samples", miniters=len(first_frames)//10):
@@ -268,7 +269,7 @@ class PressingSequenceDataset(Dataset):
                         
                         # If slice data doesn't have immediately preceding data, continue. (Data Problem)
                         # Always press left -> right
-                        # If pressed players team is home, flip
+                        # If pressed players' team is home, flip
                         if X_slice.loc[(X_slice['frame_id']==frame_id-1) & (X_slice['is_ball_carrier']==True)]['team_id'].iloc[0] == match_dict['teams']['Home']['tID'].iloc[0]:
                             for col in self.cols_to_flip:
                                 X_slice.loc[:, col] = -X_slice.loc[:, col]
@@ -329,10 +330,10 @@ class PressingSequenceDataset(Dataset):
                         x_tensor = x_tensor.reshape(self.sequence_length, num_agents, len(self.feature_cols))
                         y_tensor = torch.tensor(label, dtype=torch.long)
                         
-                        # Debug (Start)
+                        # Debug 
                         if x_tensor.isnan().any():
                             print("Find Nan", match_id, period_id, frame_id)
-                        # Debug (End)
+                        
                         all_features_seqs.append(x_tensor)
                         all_pressintensity_seqs.append(pressing_intensity_tensor)
                         all_labels.append(y_tensor)
@@ -344,6 +345,7 @@ class PressingSequenceDataset(Dataset):
                         print(f"Error | Match ID : {match_id} | Period {period_id} | Frame ID {frame_id} : {e}")
                         continue
                 self.features_seqs = all_features_seqs
+                
                 self.pressintensity_seqs = all_pressintensity_seqs
                 self.labels = all_labels
                 self.presser_ids = all_presser_ids
@@ -604,7 +606,7 @@ class SoccerMapInputDataset(Dataset): # Renamed from PressingFrameDataset
         return spatial_map, label
 
 class exPressInputDataset(Dataset):
-    def __init__(self, pickled_dataset_path):
+    def __init__(self, pickled_dataset_path, feature_min_vals=None, feature_max_vals=None):
         """Loads data from the pickled PressingSequenceDataset object."""
         print(f"Loading dataset from {pickled_dataset_path}...")
         try:
@@ -616,95 +618,39 @@ class exPressInputDataset(Dataset):
         except Exception as e:
             print(f"Error loading pickled dataset: {e}")
 
-        # # Normalization
-        # num_features = self.loaded_data[0]['features'].shape[2]
-
-        # # 각 피처 차원별 최솟값과 최댓값을 저장할 텐서를 초기화합니다.
-        # # shape: [NumFeatures]
-        # current_min_vals = torch.full((num_features,), float('inf'), dtype=torch.float32)
-        # current_max_vals = torch.full((num_features,), float('-inf'), dtype=torch.float32)
-    
-        # for idx in range(len(self.loaded_data)):
-        #     features_tensor = self.loaded_data[0]['features']
-        #     min_in_tensor = torch.min(torch.min(features_tensor, dim=0).values, dim=0).values
-        #     max_in_tensor = torch.max(torch.max(features_tensor, dim=0).values, dim=0).values
-
-        #     current_min_vals = torch.minimum(current_min_vals, min_in_tensor)
-        #     current_max_vals = torch.maximum(current_max_vals, max_in_tensor)
-
-        # self.feature_min_vals = current_min_vals
-        # self.feature_max_vals = current_max_vals
+        # Normalization
+        num_features = self.loaded_data[0]['features'].shape[2]
+        if feature_min_vals is None and feature_max_vals is None:
+             # Compute min/max across the entire dataset
+            current_min_vals = torch.full((num_features,), float('inf'), dtype=torch.float32)
+            current_max_vals = torch.full((num_features,), float('-inf'), dtype=torch.float32)
         
-        # # __getitem__에서 브로드캐스팅을 위해 shape 변경: [1, 1, NumFeatures]
-        # self.min_vals_bcast = self.feature_min_vals.reshape(1, 1, -1)
-        # self.max_vals_bcast = self.feature_max_vals.reshape(1, 1, -1)
+            for idx in range(len(self.loaded_data)):
+                features_tensor = self.loaded_data[0]['features']
+                min_in_tensor = torch.min(torch.min(features_tensor, dim=0).values, dim=0).values
+                max_in_tensor = torch.max(torch.max(features_tensor, dim=0).values, dim=0).values
+
+                current_min_vals = torch.minimum(current_min_vals, min_in_tensor)
+                current_max_vals = torch.maximum(current_max_vals, max_in_tensor)
+
+            self.feature_min_vals = current_min_vals
+            self.feature_max_vals = current_max_vals
+        else:
+            self.feature_min_vals = feature_min_vals
+            self.feature_max_vals = feature_max_vals
         
-        # self.feature_ranges = self.max_vals_bcast - self.min_vals_bcast
-        # # 범위가 0인 경우 (피처 값이 상수인 경우) 0으로 나누는 것을 방지합니다.
-        # # 이 경우 정규화된 값은 0이 됩니다. ( (X - min) / 1 = 0 )
-        # self.feature_ranges[self.feature_ranges == 0] = 1.0 
+        # __getitem__에서 브로드캐스팅을 위해 shape 변경: [1, 1, NumFeatures]
+        self.min_vals = self.feature_min_vals.reshape(1, 1, -1)
+        self.max_vals = self.feature_max_vals.reshape(1, 1, -1)
+        
+        self.feature_ranges = self.max_vals - self.min_vals
+         # Prevent division by zero for constant features
+        self.feature_ranges[self.feature_ranges == 0] = 1.0 
 
     def __len__(self):
         """Returns the total number of samples."""
         return len(self.loaded_data)
 
-    def _normalize_features(self, features):
-        # prepare min and denom tensors [A, F]
-        T, A, F = features.shape
-        
-        # boolean mask: last agent is ball
-        is_ball = torch.zeros(A, dtype=torch.bool, device=features.device)
-        is_ball[-1] = True
-
-        mins = torch.zeros(A, F, device=features.device)
-        maxs = torch.zeros(A, F, device=features.device)
-
-        # 0: x, 1: y, 2: vx, 3: vy, 4: v, 5: ax, 6: ay, 7: a
-        # x, y
-        mins[:, 0] = PITCH_X_MIN
-        maxs[:, 0] = PITCH_X_MAX
-        mins[:, 1] = PITCH_Y_MIN
-        maxs[:, 1] = PITCH_Y_MAX
-
-        # vx, vy
-        player_v = MAX_PLAYER_SPEED
-        ball_v   = MAX_BALL_SPEED
-        vmaxs = torch.where(is_ball, ball_v, player_v)
-        mins[:, 2] = -vmaxs
-        maxs[:, 2] =  vmaxs
-        mins[:, 3] = -vmaxs
-        maxs[:, 3] =  vmaxs
-
-        # v (speed magnitude)
-        mins[:, 4] = 0.0
-        maxs[:, 4] = vmaxs
-
-        # ax, ay
-        player_a = MAX_PLAYER_ACCELERATION
-        ball_a   = MAX_BALL_ACCELERATION
-        amaxs = torch.where(is_ball, ball_a, player_a)
-        mins[:, 5] = -amaxs
-        maxs[:, 5] =  amaxs
-        mins[:, 6] = -amaxs
-        maxs[:, 6] =  amaxs
-
-        # a (acceleration magnitude)
-        mins[:, 7] = 0.0
-        maxs[:, 7] = amaxs
-
-        # reshape to [1, A, F] for broadcasting over time
-        mins = mins.unsqueeze(0)
-        maxs = maxs.unsqueeze(0)
-
-        # reshape to [1, A, F] for broadcasting over time
-        mins = mins.unsqueeze(0)
-        maxs = maxs.unsqueeze(0)
-
-        # min-max normalize and clamp to [0,1]
-        norm_feats = (features - mins) / (maxs - mins)
-        norm_feats = torch.clamp(norm_feats, 0.0, 1.0)
-        return features
-    
     def __getitem__(self, idx):
         """
         Returns a dictionary containing sequence data for the sample at the given index.
@@ -713,7 +659,8 @@ class exPressInputDataset(Dataset):
         if self.loaded_data is None or idx >= len(self.loaded_data):
             raise IndexError("Index out of bounds or data not loaded")
         features = self.loaded_data[idx]['features']
-        features = self._normalize_features(features)
+        # Normalize
+        features = (features - self.min_vals) / self.feature_ranges
 
         pressing_intensity = self.loaded_data[idx]['pressing_intensity']
         _, cur_players1, cur_players2 = pressing_intensity.shape

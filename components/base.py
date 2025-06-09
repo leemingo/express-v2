@@ -128,7 +128,7 @@ class BaseComponent(ABC):
     def _setup_model(self):
         pass
 
-    def _setup_trainer(self):
+    def _setup_trainer(self, stage="fit"):
         """Initializes the PyTorch Lightning Trainer."""
         print("Setting up Trainer...")
         # Callbacks
@@ -138,20 +138,21 @@ class BaseComponent(ABC):
         ckpt_filename = f"{self.args.model_type}-" + "{epoch:02d}-{val_loss:.2f}"
 
         callbacks_list = []
-        if self.val_loader: # Only add monitoring callbacks if validation occurs
-            print(f"Configuring Checkpoint and Early Stopping based on '{monitor_metric}'")
-            self.checkpoint_cb = pl.callbacks.ModelCheckpoint( # Store reference
-                monitor=monitor_metric, dirpath=ckpt_path, filename=ckpt_filename,
-                save_top_k=self.checkpoint_cfg.get('save_top_k', 1), mode=self.checkpoint_cfg.get('mode','min'),
-                verbose=self.checkpoint_cfg.get('verbose', True) )
-            early_stop_cb = pl.callbacks.EarlyStopping(
-                monitor=self.early_stop_cfg.get('monitor', 'val_loss'), patience=self.early_stop_cfg.get('patience', 5),
-                min_delta=self.early_stop_cfg.get('min_delta', 1e-3), verbose=self.early_stop_cfg.get('verbose', True),
-                mode=self.early_stop_cfg.get('mode','min'),
-                # strict=self.early_stop_cfg.get('strict', False)
-                )
-            callbacks_list.extend([self.checkpoint_cb, early_stop_cb])
-        else: print("Validation loader not available. Skipping ModelCheckpoint and EarlyStopping.")
+        if stage == "fit":
+            if self.val_loader: # Only add monitoring callbacks if validation occurs
+                print(f"Configuring Checkpoint and Early Stopping based on '{monitor_metric}'")
+                self.checkpoint_cb = pl.callbacks.ModelCheckpoint( # Store reference
+                    monitor=monitor_metric, dirpath=ckpt_path, filename=ckpt_filename,
+                    save_top_k=self.checkpoint_cfg.get('save_top_k', 1), mode=self.checkpoint_cfg.get('mode','min'),
+                    verbose=self.checkpoint_cfg.get('verbose', True) )
+                early_stop_cb = pl.callbacks.EarlyStopping(
+                    monitor=self.early_stop_cfg.get('monitor', 'val_loss'), patience=self.early_stop_cfg.get('patience', 5),
+                    min_delta=self.early_stop_cfg.get('min_delta', 1e-3), verbose=self.early_stop_cfg.get('verbose', True),
+                    mode=self.early_stop_cfg.get('mode','min'),
+                    # strict=self.early_stop_cfg.get('strict', False)
+                    )
+                callbacks_list.extend([self.checkpoint_cb, early_stop_cb])
+            else: print("Validation loader not available. Skipping ModelCheckpoint and EarlyStopping.")
 
         # Add progress bar callback (adjust refresh rate if needed)
         callbacks_list.append(TQDMProgressBar(refresh_rate=50)) # Example refresh rate
@@ -180,7 +181,7 @@ class BaseComponent(ABC):
             gradient_clip_val=self.trainer_cfg.get('gradient_clip_val', 0.0),
             callbacks=callbacks_list,
             logger=tensorboard_logger,
-            log_every_n_steps=max(1, len(self.train_loader)//20) if self.train_loader and len(self.train_loader)>0 else 1,
+            log_every_n_steps=max(1, len(self.train_loader)//20) if stage=='fit' else 1,
             deterministic=True
         )
 
@@ -189,7 +190,7 @@ class BaseComponent(ABC):
         self._setup_data(stage='fit') # Setup train/val data
         if not self.train_loader: print("Training loader not created. Aborting train."); return
         self._setup_model()
-        self._setup_trainer()
+        self._setup_trainer(stage='fit')
 
         print(f"Starting training for model type: {self.args.model_type}")
         try:
@@ -203,6 +204,8 @@ class BaseComponent(ABC):
     def test(self, ckpt_path):
         """Runs the testing process using the best checkpoint."""
         self._setup_data(stage='test') # Setup test data
+        self._setup_model()
+        self._setup_trainer(stage='test')
         if not self.test_loader: print("Test loader not created. Aborting test."); return
         
         if not os.path.exists(ckpt_path):
