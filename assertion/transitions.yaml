@@ -1,0 +1,362 @@
+
+initial_state: "kick_off"
+states:
+  - "kick_off"
+  - "in_possession"
+  - "in_transition"
+  - "ball_neutral"
+  - "set_piece"
+  - "post_shot"
+  - "pause"
+
+transitions:
+  - trigger: "Pass"  # 선수 간 공 전달
+    source: 
+      - "in_possession"
+      - "kick_off"
+    dest: "in_transition"
+
+  - trigger: "Cross"  # 선수 간 공 전달
+    source: 
+      - "in_possession"
+    dest: "in_transition"
+    
+  - trigger: "Pass Received"  # 패스를 받은 선수의 행동
+    source: 
+      - "in_transition"
+      - "ball_neutral" 
+    dest: "in_possession"
+    conditions: "is_intended_receiver"
+
+  - trigger: "Out"  # 볼 아웃 상황
+    source: 
+      - "in_transition"
+      - "ball_neutral"
+      - "post_shot"
+      - "in_possession"
+    dest: "set_piece"
+
+  # ----Duel의 조건 세분화----
+  - trigger: "Duel"  # 1대1 경합 상황
+    source: 
+      - "in_transition"
+    dest: "in_transition"
+
+  - trigger: "Duel"  # 1대1 경합 상황
+    source: 
+      - "in_possession"
+    dest: "in_possession"
+    
+  - trigger: "Duel"  # 1대1 경합 상황
+    source: 
+      - "ball_neutral"
+    dest: "ball_neutral"
+
+
+  # ----------------------------
+
+  # ----Corner의 조건 세분화----
+  - trigger: "Pass_Corner"  # 1대1 경합 상황
+    source: 
+      - "set_piece"
+    dest: "in_transition"
+
+  - trigger: "Shot_Corner"  # 1대1 경합 상황
+    source: 
+      - "set_piece"
+    dest: "post_shot"
+
+  - trigger: "Recovery"  # 공을 다시 확보
+    source: 
+      - "ball_neutral"
+      - "in_transition" 
+    dest: "in_possession"
+
+  - trigger: "Clearance"  # 위험 지역에서 공을 걷어내기
+    source: 
+      - "in_possession"
+    dest: "in_transition"
+
+  # ----tackle의 조건 세분화----
+  - trigger: "Interception"  # 패스, 움직이는 볼 가로채기
+    source: 
+      - "in_possession"
+      - "in_transition"
+      - "ball_neutral"
+    dest: "in_possession"
+
+  - trigger: "Interception"  # 패스, 움직이는 볼 가로채기
+    source: 
+      - "post_shot"
+    dest: "in_possession"
+    condions: "always_false" 
+
+  # ----tackle의 조건 세분화----
+  - trigger: "Tackle"
+    source: 
+      - "in_transition"
+    dest: "in_transition"
+    conditions: "is_tackle_in_transition"
+
+  - trigger: "Tackle"
+    source: 
+      - "in_possession"
+    dest: "in_possession"
+    conditions: "is_tackle_in_posession"
+
+  - trigger: "Tackle"
+    source: 
+      - "ball_neutral"
+    dest: "ball_neutral"
+    conditions: "is_tackle_ball_neutral"
+
+  - trigger: "Tackle"
+    source: 
+      - "post_shot"
+    dest: "post_shot"
+    conditions: "is_tackle_post_shot"
+  # ----------------------------
+
+  - trigger: "Carry"  # 드리블
+    source: 
+      - "in_possession"
+    dest: "in_possession"
+
+  - trigger: "Block"  # 슈팅이나 패스 블록
+    source: 
+      - "in_transition"
+      - "ball_neutral"
+      - "post_shot"
+    dest: "ball_neutral"
+
+  - trigger: "Intervention"  # 수비 개입
+    source: 
+      - "ball_neutral"
+      - "in_transition"
+      - "in_possession"
+    dest: "ball_neutral"
+
+  - trigger: "Shot"  # 슈팅
+    source: 
+      - "in_possession"
+      - "set_piece"
+    dest: "post_shot"
+
+  - trigger: "Take-On"  # 드리블 돌파
+    source: 
+      - "in_possession"
+    dest: "in_possession"
+
+
+  - trigger: "Cross Received"  # 크로스를 받아 연결
+    source: 
+      - "in_transition"
+    dest: "in_possession"
+    conditions: "is_intended_receiver"
+
+  - trigger: "Catch"  # 골키퍼가 잡음
+    source: 
+      - "post_shot"
+      - "ball_neutral"
+      - "in_transition"
+    dest: "in_possession"
+
+  # ----Parru의 조건 세분화----
+  - trigger: "Parry"  # 골키퍼 선방
+    source: 
+      - "post_shot"
+      - "ball_neutral"
+      - "in_transition"
+    dest: "ball_neutral"
+
+  - trigger: "Ball Received"  # 볼 수신
+    source: 
+      - "in_transition"
+      - "in_possession"  # 드리블이 길어지는 상황에 팀원이 공을 잡는 경우도 해당됨.
+      - "ball_neutral"
+    dest: "in_possession"
+
+  - trigger: "Hit"  # 타격 (선수끼리 부딪힌 상황)
+    source: 
+      - "in_transition"
+      - "in_possession"
+      - "ball_neutral"
+      - "post_shot"
+    dest: "ball_neutral"
+
+  - trigger: "Goal Post"  # 타격 (선수끼리 부딪힌 상황)
+    source: 
+      - "post_shot"
+    dest: "ball_neutral"
+
+  - trigger: "Goal Miss"  # 타격 (선수끼리 부딪힌 상황)
+    source: 
+      - "post_shot"
+    dest: "ball_neutral"
+
+  - trigger: "Offside"  # 오프사이드
+    source: 
+      - "in_transition"
+      - "in_possession"
+      - "ball_neutral"
+      - "post_shot"
+    dest: "set_piece"
+
+  - trigger: "Goal"  # 득점 or 실점 -> Goal로 변경했습니다.
+    source: 
+      - "post_shot"
+      - "ball_neutral"
+    dest: "kick_off"
+
+  - trigger: "Goal Conceded" # goal(or own_goal) -> Goal Conceded
+    source: 
+      - "in_possession"
+      - "in_transition"
+      - "ball_neutral"
+      - "set_piece"
+      - "post_shot"
+    dest: "kick_off"
+    conditions: "always_false" # shot, goal이벤트가 존재하지 않아서 생기는 triggerf로 hander에서 무조건 제거
+
+  - trigger: "Deflection"  # 슈팅, 패스 굴절
+    source: 
+      - "post_shot"
+      - "in_transition"
+    dest: "ball_neutral"
+
+  # ----골키퍼의 오프더 볼 움직임----
+  - trigger: "Defensive Line Support"  # 골키퍼의 수비 지원
+    source: 
+      - "in_transition"
+    dest: "in_transition"
+    conditions: "is_goalkeeper_condition"
+
+  - trigger: "Defensive Line Support"  # 골키퍼의 수비 지원
+    source: 
+      - "in_possession"
+    dest: "in_possession"
+    conditions: "is_goalkeeper_condition"
+
+  - trigger: "Defensive Line Support"  # 골키퍼의 수비 지원
+    source: 
+      - "ball_neutral"
+    dest: "ball_neutral"
+    conditions: "is_goalkeeper_condition"
+
+  - trigger: "Defensive Line Support"  # 골키퍼의 수비 지원
+    source: 
+      - "post_shot"
+    dest: "post_shot"
+    conditions: "is_goalkeeper_condition"
+
+  - trigger: "Aerial Clearance"  # 공중 클리어링
+    source: 
+      - "in_transition"
+    dest: "in_transition"
+    conditions: "is_goalkeeper_condition"
+
+  # - trigger: "Aerial Clearance"  # 골키퍼의 수비 지원
+  #   source: 
+  #     - "in_possession"
+  #   dest: "in_possession"
+  #   conditions: "is_goalkeeper_condition"
+
+  - trigger: "Aerial Clearance"  # 공중 클리어링
+    source: 
+      - "ball_neutral"
+    dest: "ball_neutral"
+    conditions: "is_goalkeeper_condition"
+
+  - trigger: "Aerial Clearance"  # 골키퍼의 수비 지원
+    source: 
+      - "post_shot"
+    dest: "post_shot"
+    conditions: "is_goalkeeper_condition"
+
+  # ----------------------------
+  - trigger: "Own Goal"  # 자책골
+    source: 
+      - "in_possession"
+      - "in_transition"
+      - "ball_neutral"
+      - "set_piece"
+      - "post_shot"
+    dest: "kick_off"
+
+  - trigger: "Pass_Freekick"  
+    source: 
+      - "set_piece"
+    dest: "in_transition"
+
+  - trigger: "Shot_Freekick" 
+    source: 
+      - "set_piece"
+    dest: "post_shot"
+
+  - trigger: "Goal Kick"  # 골킥
+    source: 
+      - "set_piece"
+    dest: "in_transition"
+
+  - trigger: "Throw-In"  # none referee
+    source: 
+      - "set_piece"
+    dest: "in_transition"
+
+  - trigger: "Penalty Kick"  # 패널티 킥
+    source: 
+      - "set_piece"
+    dest: "post_shot"
+
+  - trigger: "Error"  
+    source: 
+      - "in_possession"
+      - "in_transition"
+      - "ball_neutral"
+      - "post_shot"
+    dest: "ball_neutral"
+
+  # ----foul조건 세분화----
+  - trigger: "Foul_Throw"  # 반칙 당한 선수가 없는 경우에만 발생하고 그 외는 Foul Won과 병합
+    source: 
+      - "set_piece"     # Foul Throw-In
+    dest: "set_piece"
+
+  - trigger: "Handball_Foul"  # 반칙 당한 선수가 없는 경우에만 발생하고 그 외는 Foul Won과 병합
+    source: 
+      - "in_transition" # Handball Foul 
+      - "in_possession" # Handball Foul 
+      - "post_shot"     # Handball Foul 
+      - "ball_neutral"  
+    dest: "set_piece"
+
+  - trigger: "Foul"   # 득점 이후 항의하는 파울(not reactor_player_id)
+    source: 
+      - "in_transition" 
+      - "in_possession" 
+      - "post_shot"    
+      - "ball_neutral"  
+    dest: "set_piece"
+
+  - trigger: "Foul"   # 득점 이후 항의하는 파울(not reactor_player_id)
+    source: 
+      - "kick_off"
+    dest: "kick_off"
+
+  - trigger: "Foul" # 경기가 중단된 상태에서 파울은 self-loop
+    source: 
+      - "pause"
+    dest: "pause"
+
+  # ---- Pause이전/이후에 발생하는 이벤트 스트림은 문제가 없다고 가정하기 위한 조치 ----
+  - trigger: "Pause" # 에러가 발생하는 state가 아니므로 추후 에러 분석시 제외
+    source: 
+      - "kick_off"
+      - "in_possession"
+      - "in_transition"
+      - "ball_neutral"
+      - "set_piece"
+      - "post_shot"
+      - "pause"
+    dest: "pause"
+
