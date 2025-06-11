@@ -1,0 +1,41 @@
+player,position,team,jID,player_id,team_id,xID
+Kyeongmin Kim,GK,Home,1,250079,4648,0
+Alexandar Popovic,CB,Home,4,500133,4648,1
+Youngkyu Ahn,CB,Home,6,62365,4648,2
+Hyeonseok Doo,RB,Home,13,62386,4648,3
+Jinho Kim,LB,Home,27,500140,4648,4
+Gabriel,RM,Home,11,500135,4648,5
+Hoyeon Jeong,CM,Home,14,250101,4648,6
+Hyeokjoo An,LM,Home,28,500141,4648,7
+Kyongrok Choi,CM,Home,30,500139,4648,8
+Huigyun Lee,CF,Home,10,77414,4648,9
+Kunhee Lee,CF,Home,20,250102,4648,10
+Jun Lee,,Home,21,250099,4648,11
+Seungwoo Kim,,Home,5,250108,4648,12
+Junsu Byeon,CB,Home,15,500138,4648,13
+Jisung Eom,LM,Home,7,188178,4648,14
+Kang Hyun Lee,,Home,24,360389,4648,15
+Hangil Kim,,Home,47,360166,4648,16
+Taejun Park,CM,Home,55,500142,4648,17
+Yool Heo,CF,Home,18,145703,4648,18
+Huseong Oh,CF,Home,77,369783,4648,19
+Chul Won Choi,GK,Away,21,344466,316,0
+Jinya Kim,LB,Away,17,139210,316,1
+Jusung Kim,CB,Away,30,77579,316,2
+Wankyu Kwon,CB,Away,3,344467,316,3
+Dongjin Park,RB,Away,50,62009,316,4
+Sungyueng Ki,CM,Away,6,161110,316,5
+Seunggyu Han,CM,Away,66,143410,316,6
+Aleksandar Palocevic,CAM,Away,26,187326,316,7
+Youngwook Cho,LW,Away,32,62038,316,8
+Sinjin Kim,CF,Away,9,248890,316,9
+Seongjin Kang,RW,Away,11,188266,316,10
+Jongbum Baek,,Away,1,77582,316,11
+Taeseok Lee,LB,Away,88,188267,316,12
+Rebin Sulaka,,Away,14,500125,316,13
+RYU Jaemoon,,Away,29,500129,316,14
+Sanghoon Paik,,Away,25,188258,316,15
+Sanghyub Lim,RW,Away,7,344465,316,16
+Jesse Lingard,CAM,Away,10,500124,316,17
+Gyeongmin Kim,LW,Away,19,344552,316,18
+Stanislav Iljutcenko,CF,Away,90,286696,316,19

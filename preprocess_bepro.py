@@ -238,7 +238,7 @@ def resample_tracking_dataframe(tracking_df, target_hz):
 
             # Interpolation
             interpolation_cols = ['x', 'y', 'speed']
-            reindexed_group[interpolation_cols] = reindexed_group[interpolation_cols].interpolate(method='cubic', limit_area='inside')
+            reindexed_group[interpolation_cols] = reindexed_group[interpolation_cols].interpolate(method='pchip', limit_area='inside')
             
             # 5. 최종 결과 필터링: 보간된 결과에서 25Hz 시간대의 데이터만 선택
             final_group = reindexed_group.reindex(global_target_index)
@@ -401,11 +401,11 @@ def create_tracking_dataframe(match_path, meta_data, teams_dict):
 
 if __name__ == "__main__":
     root_path = os.path.abspath("..")
-    data_path = "/data/MHL/bepro/raw"
+    data_path = "/home/exPress/PlayerImputer/data/BEPRO/2024"
 
-    match_id_lst = os.listdir(data_path)
+    match_id_lst = sorted(os.listdir(data_path))
     total_dict = {match_id : {} for match_id in match_id_lst}
-    for match_id in match_id_lst:
+    for match_id in tqdm(match_id_lst[1:]):
         print(f"Preprocessing Match ID {match_id}: Converting data into kloppy format...")
         match_dict = {}
         # if not os.path.exists(os.path.join(os.path.dirname(data_path), "processed", f"{match_id}_processed_dict.pkl")):
@@ -426,8 +426,14 @@ if __name__ == "__main__":
         total_dict[match_id]['event_df'] = event_df
         total_dict[match_id]['teams'] = teams_dict
         total_dict[match_id]['meta_data'] = meta_data
-        save_dir = os.path.join(os.path.dirname(data_path), "processed", match_id, f"{match_id}_processed_dict.pkl")
-        with open(save_dir, "wb") as f:
+        save_dir = os.path.join(
+            os.path.dirname(data_path), 
+            "processed", 
+            match_id)
+        os.makedirs(save_dir, exist_ok=True)        
+        save_path = os.path.join(save_dir, f"{match_id}_processed_dict.pkl")
+
+        with open(save_path, "wb") as f:
             pickle.dump(total_dict[match_id], f)
         print(f"Preprocessing Match ID {match_id} Done. Saved location: {save_dir}")
         # else:
