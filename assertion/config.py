@@ -112,8 +112,8 @@ versa_to_spadl_dict = {
     "Intervention":     "non_action",     # 인터벤션은 조금 애매한데..일단 보류
     "Interception":     "interception",
     "Block":            "block",
-    "Pass Received":    "non_action",     # 패스 리시브도 제거
-    "Cross Received":   "non_action",
+    "Pass Received":    "Received",     # 패스 리시브도 제거
+    "Cross Received":   "Received",
     "Ball Received":    "non_action",
     "Recovery":         "recovery",       # spadl에 없는 액션 추가
     "Carry":            "dribble",       
