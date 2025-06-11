@@ -238,7 +238,7 @@ def resample_tracking_dataframe(tracking_df, target_hz):
 
             # Interpolation
             interpolation_cols = ['x', 'y', 'speed']
-            reindexed_group[interpolation_cols] = reindexed_group[interpolation_cols].interpolate(method='cubic', limit_area='inside')
+            reindexed_group[interpolation_cols] = reindexed_group[interpolation_cols].interpolate(method='pchip', limit_area='inside')
             
             # 5. 최종 결과 필터링: 보간된 결과에서 25Hz 시간대의 데이터만 선택
             final_group = reindexed_group.reindex(global_target_index)
@@ -405,6 +405,7 @@ if __name__ == "__main__":
 
     match_id_lst = os.listdir(data_path)
     total_dict = {match_id : {} for match_id in match_id_lst}
+
     for match_id in match_id_lst:
         print(f"Preprocessing Match ID {match_id}: Converting data into kloppy format...")
         match_dict = {}

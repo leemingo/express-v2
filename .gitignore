@@ -1,5 +1,6 @@
 *.mp4
 *.csv
+*.gz
 
 # Log files and directories
 logs/

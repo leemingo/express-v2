@@ -120,90 +120,6 @@ class _FusionLayer(nn.Module):
         return out
 
 
-# class SoccerMap(nn.Module):
-#     """SoccerMap architecture.
-
-#     SoccerMap is a deep learning architecture that is capable of estimating
-#     full probability surfaces for pass probability, pass slection likelihood
-#     and pass expected values from spatiotemporal data.
-
-#     The input consists of a stack of c matrices of size lxh, each representing a
-#     subset of the available spatiotemporal information in the current
-#     gamestate. The specific choice of information for each of these c slices
-#     might vary depending on the problem being solved
-
-#     Parameters
-#     ----------
-#     in_channels : int, default: 13
-#         The number of spatiotemporal input channels.
-
-#     References
-#     ----------
-#     .. [1] Fernández, Javier, and Luke Bornn. "Soccermap: A deep learning
-#        architecture for visually-interpretable analysis in soccer." Joint
-#        European Conference on Machine Learning and Knowledge Discovery in
-#        Databases. Springer, Cham, 2020.
-#     """
-
-#     def __init__(self, model_config):
-#         super().__init__()
-
-#         self.in_channels = model_config["in_channels"]
-
-#         # Convolutions for feature extraction at 1x, 1/2x and 1/4x scale
-#         self.features_x1 = _FeatureExtractionLayer(self.in_channels)
-#         self.features_x2 = _FeatureExtractionLayer(64)
-#         self.features_x4 = _FeatureExtractionLayer(64)
-#         self.features_x8 = _FeatureExtractionLayer(64)
-#         self.features_x16 = _FeatureExtractionLayer(64)
-
-#         # Layers for down and upscaling and merging scales
-#         # self.up_x2 = _UpSamplingLayer()
-#         # self.up_x4 = _UpSamplingLayer()
-#         self.down_x2 = nn.MaxPool2d(kernel_size=(2, 2))
-#         self.down_x4 = nn.MaxPool2d(kernel_size=(2, 2))
-#         self.down_x8 = nn.MaxPool2d(kernel_size=(2, 2))
-#         self.down_x16 = nn.MaxPool2d(kernel_size=(2, 2))
-
-#         # self.fusion_x2_x4 = _FusionLayer()
-#         # self.fusion_x1_x2 = _FusionLayer()
-
-#         # Prediction layers at each scale
-#         # self.prediction_x1 = _PredictionLayer()
-#         # self.prediction_x2 = _PredictionLayer()
-#         # self.prediction_x4 = _PredictionLayer()
-#         # self.prediction_x8 = _PredictionLayer()
-#         self.prediction_x16 = _PredictionLayer()
-
-#         # output layer: binary classification
-#         self.output_layer = nn.Sequential(
-#             nn.Flatten(),  # Flatten to (batch_size, num_features)
-#             nn.Linear((68 // 16) * (104 // 16), 1),  # Linear layer to output a single value
-#         )
-
-#     def forward(self, x):
-#         # Feature extraction
-#         f_x1 = self.features_x1(x)
-#         f_x2 = self.features_x2(self.down_x2(f_x1))
-#         f_x4 = self.features_x4(self.down_x4(f_x2))
-#         f_x8 = self.features_x8(self.down_x8(f_x4))
-#         f_x16 = self.features_x16(self.down_x16(f_x8))
-
-#         pred_x16 = self.prediction_x16(f_x16)
-
-#         # Prediction
-#         # pred_x1 = self.prediction_x1(f_x1)
-#         # pred_x2 = self.prediction_x2(f_x2)
-#         # pred_x4 = self.prediction_x4(f_x4)
-
-#         # Fusion
-#         # x4x2combined = self.fusion_x2_x4([self.up_x4(pred_x4), pred_x2])
-#         # combined = self.fusion_x1_x2([self.up_x2(x4x2combined), pred_x1]) # (bs, 1, 68, 104)
-
-#         # The activation function depends on the problem
-#         return self.output_layer(pred_x16)  # Output shape: (bs, 1)
-#         # return combined
-
 class SoccerMap(nn.Module):
     """SoccerMap architecture.
 
@@ -414,7 +330,7 @@ class PytorchSoccerMapModel(pl.LightningModule):
         self.train_accuracy.update(preds, targets.int()) 
         self.log("train_acc", self.train_accuracy, on_step=False, on_epoch=True, prog_bar=True)
         self.train_auroc.update(preds, targets.int())
-        self.log("train_auroc", self.train_auroc, on_step=False, on_epoch=True, prog_bar=False) # Usually not shown on prog bar
+        self.log("train_auroc", self.train_auroc, on_step=False, on_epoch=True, prog_bar=True) # Usually not shown on prog bar
         
         # we can return here dict with any tensors
         # and then read it in some callback or in training_epoch_end() below
@@ -430,7 +346,7 @@ class PytorchSoccerMapModel(pl.LightningModule):
         self.val_accuracy.update(preds, targets.int())
         self.log("val_acc", self.val_accuracy, on_step=False, on_epoch=True, prog_bar=True)
         self.val_auroc.update(preds, targets.int())
-        self.log("val_auroc", self.val_auroc, on_step=False, on_epoch=True, prog_bar=False) # Usually not shown on prog bar
+        self.log("val_auroc", self.val_auroc, on_step=False, on_epoch=True, prog_bar=True) # Usually not shown on prog bar
         
         return {"loss": loss, "preds": preds, "targets": targets}
 

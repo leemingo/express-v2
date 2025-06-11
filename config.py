@@ -9,6 +9,9 @@ BALL_CARRIER_THRESHOLD: float = 25.0
 PITCH_X_MIN, PITCH_X_MAX = -52.5, 52.5
 PITCH_Y_MIN, PITCH_Y_MAX = -34.0, 34.0
 
+FEAT_MIN = [-26., -8., -2., -13., 0., -5., -8., 0.]
+FEAT_MAX = [54., 21., 6., 1., 14., 2., 3., 6.]
+
 class Constant:
     BALL = "ball"
 

@@ -1,8 +1,13 @@
 import numpy as np
+import os
 import pandas as pd
+from pathlib import Path
 
 import config as C
 from config import Constant, Column, Group
+
+import tarfile # zipfile 대신 tarfile을 임포트합니다.
+
 
 
 def infer_ball_carrier(tracking_df, source='bepro'):
@@ -253,3 +258,46 @@ def infer_ball_carrier(tracking_df, source='bepro'):
          output_df = output_df.drop(columns=['ball_owning_player_id']) 
 
     return output_df.reset_index(drop=True) # Reset index
+
+
+def archive_to_tar_gz(root_dir, file_suffix, output_tar_name):
+    """
+    지정된 루트 디렉토리의 각 하위 폴더에서, 폴더 이름(match_id)을 포함하는
+    특정 파일을 찾아 하나의 tar.gz 파일로 압축합니다.
+
+    Args:
+        root_dir (str): 'match_id' 폴더들이 있는 최상위 경로.
+        file_suffix (str): 찾을 파일 이름의 접미사 (예: '_processed_dict.pkl').
+        output_tar_name (str): 생성할 tar.gz 파일의 이름.
+    """
+    root_path = Path(root_dir)
+    if not root_path.is_dir():
+        print(f"❌ 에러: 경로를 찾을 수 없습니다 -> '{root_dir}'")
+        return
+
+    # 1. 압축할 파일 목록 찾기 (이 부분은 동일합니다)
+    file_pattern = f"*{file_suffix}"
+    files_to_archive = sorted(list(root_path.glob(f"*/{file_pattern}")))
+
+    if not files_to_archive:
+        print(f"❌ 에러: '{file_pattern}' 패턴의 파일을 찾을 수 없습니다. 경로와 파일 이름을 확인해주세요.")
+        return
+
+    print(f"🗂️ 총 {len(files_to_archive)}개의 일치하는 파일을 찾았습니다.")
+    print(f"압축을 시작합니다... -> '{output_tar_name}'")
+
+    # 2. tar.gz 파일 생성 및 파일 추가
+    try:
+        # 'w:gz' 모드는 gzip으로 압축된 쓰기 모드를 의미합니다.
+        with tarfile.open(output_tar_name, 'w:gz') as tarf:
+            for file_path in files_to_archive:
+                # arcname은 tar 파일 내에 저장될 경로와 이름입니다.
+                arcname = file_path.relative_to(root_path)
+                # tarf.add()를 사용하여 파일을 추가합니다.
+                tarf.add(file_path, arcname=arcname)
+                print(f"  -> 추가 중: {arcname}")
+
+        print(f"\n✅ 압축 완료! 현재 위치에 '{output_tar_name}' 파일이 생성되었습니다.")
+
+    except Exception as e:
+        print(f"\n❌ 압축 중 에러가 발생했습니다: {e}")

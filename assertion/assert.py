@@ -10,7 +10,8 @@ warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
 from pathlib import Path
 base_path = Path(__file__).resolve().parent.parent
 print(f"Base path: {base_path}")
-data_path = Path(base_path, "data", "bepro", "processed")
+# data_path = Path(base_path, "data", "bepro", "processed")
+data_path = Path("/data/MHL/bepro/processed")
 yaml_file = Path(base_path, "assertion", "transitions.yaml")
 
 from bepro import convert_to_actions
@@ -19,8 +20,11 @@ import assertion.config as lsdpconfig
 
 def load_and_save_data():
     match_id_lst = [id for id in os.listdir(data_path) if "DS" not in id] # DF_Stores: acOS에서 Finder가 해당 폴더의 메타데이터를 저장하기 위해 자동으로 생성하는 숨김 파일
-    match_id_lst = match_id_lst[:1]
-    for match_id in tqdm(match_id_lst[23:], desc="Loading games"):  
+    
+    # for match_id in tqdm(match_id_lst[23:], desc="Loading games"):  
+    for match_id in tqdm(match_id_lst, desc="Loading games"):  
+        if match_id not in ["126319", "126325", "126386", "126408", "126444", "126466", "126476", "153390"]: continue
+        print(match_id)
         with open(f"{data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
             match_dict = pickle.load(f)
             events = match_dict['event_df']

@@ -126,9 +126,8 @@ class exPressComponent(BaseComponent):
         full_train_dataset = exPressInputDataset(train_pkl_path)
         if len(full_train_dataset) == 0: print("Loaded training dataset is empty."); exit()
         
-        feature_min_val, feature_max_val = full_train_dataset.feature_min_vals, full_train_dataset.feature_max_vals,  
         test_pkl_path = f"{self.args.root_path}/test_dataset.pkl"
-        test_dataset = exPressInputDataset(test_pkl_path, feature_min_val, feature_max_val)   
+        test_dataset = exPressInputDataset(test_pkl_path)   
 
         if stage == 'fit':
             total_samples = len(full_train_dataset)
