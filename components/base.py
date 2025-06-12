@@ -79,7 +79,7 @@ class BaseComponent(ABC):
         if stage == 'fit':
             train_pkl_path = f"{self.args.root_path}/train_dataset.pkl"
             if not os.path.exists(train_pkl_path):
-                full_train_dataset = PressingSequenceDataset(self.args.root_path, match_id_lst = ['J03WMX', 'J03WOH', 'J03WQQ', 'J03WN1', 'J03WOY', 'J03WR9'])
+                full_train_dataset = PressingSequenceDataset(self.args.root_path)
             else:
                 with open(train_pkl_path, "rb") as f:
                     full_train_dataset = pickle.load(f)
@@ -109,7 +109,7 @@ class BaseComponent(ABC):
         elif stage == 'test':
             test_pkl_path = f"{self.args.root_path}/test_dataset.pkl"
             if not os.path.exists(test_pkl_path):
-                test_dataset = PressingSequenceDataset(self.args.root_path, match_id_lst = ['J03WPY'])
+                test_dataset = PressingSequenceDataset(self.args.root_path)
             else:
                 with open(test_pkl_path, "rb") as f:
                     test_dataset = pickle.load(f)

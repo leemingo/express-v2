@@ -113,14 +113,15 @@
             }
         },
         "ModelConfig": {
-            "in_channels": 8,
+            "in_channels": 18,
             "num_gnn_layers": 2,
             "gnn_hidden_dim": 64,
             "num_lstm_layers": 2,
             "lstm_hidden_dim": 64,
             "lstm_dropout": 0.4,
             "lstm_bidirectional": true,
-            "use_pressing_features": false
+            "use_pressing_features": false,
+            "gnn_head": 4
         },
 
         "EarlyStopConfig": {

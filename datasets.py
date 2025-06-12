@@ -15,6 +15,7 @@ from config import *
 
 coordinates = "secondspectrum"
 num_agents = 23
+num_team_players = 11
 # --- Constants and Configuration ---
 H, W = 68, 104  # Grid dimensions (Height, Width)
 NUM_FEATURE_CHANNELS = 13 # Number of input channels for SoccerMap
@@ -217,7 +218,87 @@ class PressingSequenceDataset(Dataset):
         total_df.loc[nan_mask, 'player_code'] = total_df.loc[nan_mask, 'id']
         return total_df
 
-    
+    def _generate_features(self, frame_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Get additional features from tracking data
+
+        Args:
+            frame_df (pd.DataFrame): 단일 프레임에 대한 선수 및 공 데이터.
+                                    'id', 'team_id', 'position_name', 'is_ball_carrier',
+                                    'x', 'y', 'vx', 'vy' 등의 컬럼이 있어야 합니다.
+
+        Returns:
+            pd.DataFrame: 새로운 특징들이 추가된 데이터프레임.
+        """
+        # 원본 수정을 방지하기 위해 복사본 사용
+        df = frame_df.copy()
+
+        # --- 1. 주요 객체 식별 ---
+        ball_row = df[df['id'] == 'ball']
+        ball_carrier_row = df[df['is_ball_carrier'] == True]
+
+        # 공 또는 공 소유자가 없는 프레임은 처리하지 않음
+        if ball_row.empty or ball_carrier_row.empty:
+            # 필요한 모든 특징 컬럼을 0으로 채워서 반환 (에러 방지)
+            feature_cols_to_add = [
+                'is_teammate', 'is_goalkeeper', 'distance_to_goal', 'sin_angle_to_goal',
+                'cos_angle_to_goal', 'distance_to_ball', 'sin_angle_to_ball',
+                'cos_angle_to_ball', 'cos_velocity_angle', 'sin_velocity_angle'
+            ]
+            for col in feature_cols_to_add:
+                df[col] = 0.0
+            return df
+
+        ball_carrier = ball_carrier_row.iloc[0]
+        ball = ball_row.iloc[0]
+        
+        # 공격 방향을 왼쪽에서 오른쪽으로 가정하고, 골대 위치를 (52.5, 0)으로 설정
+        # (사전 단계에서 좌표계 통일이 되었다고 가정)
+        goal_pos = np.array([52.5, 0.0])
+
+        # --- 2. 특징 계산 ---
+
+        # A. 이진 속성 (Binary attributes)
+        # 'is_ball_carrier'는 이미 존재한다고 가정
+        df['is_teammate'] = (df['team_id'] == ball_carrier['team_id']).astype(float)
+        df['is_goalkeeper'] = (df['position_name'] == 'GK').astype(float)
+        # is_goalpost는 실제 노드가 아니므로 특징으로 추가하지 않음
+
+        # C. 벡터 계산을 위한 데이터 준비 (Numpy 배열)
+        player_positions = df[['x', 'y']].values.astype(np.float64)
+        player_velocities = df[['vx', 'vy']].values.astype(np.float64)
+        ball_position = ball[['x', 'y']].values.astype(np.float64)
+        carrier_velocity = ball_carrier[['vx', 'vy']].values.astype(np.float64)
+
+        # D. 골대 기준 상대적 특징 (Relative to goalpost)
+        vector_to_goal = goal_pos - player_positions
+        df['distance_to_goal'] = np.linalg.norm(vector_to_goal, axis=1)
+        angle_to_goal_rad = np.arctan2(vector_to_goal[:, 1], vector_to_goal[:, 0])
+        df['sin_angle_to_goal'] = np.sin(angle_to_goal_rad)
+        df['cos_angle_to_goal'] = np.cos(angle_to_goal_rad)
+
+        # E. 공 기준 상대적 특징 (Relative to ball)
+        vector_to_ball = ball_position - player_positions
+        df['distance_to_ball'] = np.linalg.norm(vector_to_ball, axis=1)
+        angle_to_ball_rad = np.arctan2(vector_to_ball[:, 1], vector_to_ball[:, 0])
+        df['sin_angle_to_ball'] = np.sin(angle_to_ball_rad)
+        df['cos_angle_to_ball'] = np.cos(angle_to_ball_rad)
+
+        # F. 선수 속도 벡터와 공 소유자 속도 벡터 간의 각도
+        dot_product = np.sum(player_velocities * carrier_velocity, axis=1)
+        norm_player = np.linalg.norm(player_velocities, axis=1)
+        norm_carrier = np.linalg.norm(carrier_velocity)
+        
+        # 0으로 나누는 것을 방지하기 위한 작은 값(epsilon)
+        denominator = (norm_player * norm_carrier) + 1e-8
+        
+        df['cos_velocity_angle'] = np.clip(dot_product / denominator, -1.0, 1.0)
+        
+        # 2D 벡터의 외적(cross product)을 이용한 사인 값 계산
+        cross_product = player_velocities[:, 0] * carrier_velocity[1] - player_velocities[:, 1] * carrier_velocity[0]
+        df['sin_velocity_angle'] = np.clip(cross_product / denominator, -1.0, 1.0)
+        
+        return df
     
     def _load_data(self):
         total_dfs = []
@@ -226,8 +307,10 @@ class PressingSequenceDataset(Dataset):
         all_features_seqs = []
         all_pressintensity_seqs = []
         all_labels = []
+        all_pressed_ids = []
         all_presser_ids = []
         all_agent_orders = []
+        all_match_infos = []
         if os.path.exists(self.data_path):  
             total_dict = {match_id : {} for match_id in self.match_id_lst}
             for match_id in self.match_id_lst:
@@ -237,7 +320,7 @@ class PressingSequenceDataset(Dataset):
                 with open(f"{data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
                     match_dict = pickle.load(f)
                 tracking_df = match_dict['tracking_df'].copy()
-                # Make the direction unified.
+                
                 teams_dict = match_dict['teams'].copy()
                 home_team = teams_dict['Home'].copy()
                 away_team = teams_dict['Away'].copy()
@@ -326,6 +409,7 @@ class PressingSequenceDataset(Dataset):
                         frame_id = row['frame_id']
                         timestamp = row['timestamp']
                         label = int(row['ball_ownership_changed'])
+                        pressed_player = row['id']
                         pressing_player = row['pressing_player']
                         window_event_df = event_df[
                             (event_df['period_id'] == period_id) &
@@ -336,37 +420,51 @@ class PressingSequenceDataset(Dataset):
                         timestamps_list = window_event_df['time_seconds'].unique().tolist() + [timestamp]
                         X_slice = total_df[(total_df['period_id'] == period_id) & (total_df['timestamp'].isin(timestamps_list))].copy()
                         
-                        # If slice data doesn't have immediately preceding data, continue. (Data Problem)
                         # Always press left -> right
                         # If pressed players' team is home, flip
                         if X_slice.loc[(X_slice['frame_id']==frame_id) & (X_slice['is_ball_carrier']==True)]['team_id'].iloc[0] == match_dict['teams']['Home']['tID'].iloc[0]:
                             for col in self.cols_to_flip:
                                 X_slice.loc[:, col] = -X_slice.loc[:, col]
 
-                        agents_rows = X_slice[pd.isna(X_slice['rows'])==False]['rows'].values[0] # Home team
-                        agents_cols = X_slice[pd.isna(X_slice['columns'])==False]['columns'].values[0] #Away team
-                        agents_order = agents_rows.tolist() + agents_cols.tolist()
+                        # Get Features
+                        X_slice = X_slice.set_index('frame_id').groupby('frame_id', group_keys=False).apply(self._generate_features)
+                        X_slice.reset_index(inplace=True)
+
+                        agents_rows = X_slice[(X_slice['frame_id']==frame_id) & (X_slice['is_ball_carrier']==True)]['rows'].values[0].tolist() # Home team
+                        agents_cols = X_slice[(X_slice['frame_id']==frame_id) & (X_slice['is_ball_carrier']==True)]['columns'].values[0].tolist() #Away team
+                        missing_cnt = 0
+                        num_missing_rows = num_team_players - len(agents_rows)
+                        if num_missing_rows > 0:
+                            for i in range(num_missing_rows):
+                                agents_rows.append(f"Missing_{missing_cnt}")
+                                missing_cnt += 1
+
+                        num_missing_cols = num_team_players - len(agents_cols)
+                        if num_missing_cols > 0:
+                            for i in range(num_missing_cols):
+                                agents_cols.append(f"Missing_{missing_cnt}")
+                                missing_cnt += 1
+                        agents_order = agents_rows + agents_cols
                         
-                        # Ensure the player IDs are consistent and match num_agents (23 players)
+                        # Ensure the player IDs are consistent and match num_agents (22 players + 1 ball)
                         num_unique_agents = X_slice['id'].nunique()
+                        all_known_agents = set(X_slice['id'].unique())
+                        missing_agent_ids = [agent for agent in agents_order if agent not in all_known_agents and 'Missing' in agent]
+
                         frame_lst = X_slice['frame_id'].unique()
-                        if num_unique_agents < num_agents:
-                            # Find the missing players
-                            num_missing_agents = num_agents - num_unique_agents
-                        
+                        if missing_agent_ids:
                             # Add missing player rows with zero values for each frame in X_slice
                             missing_rows = []
-                            for missing_player in range(num_missing_agents):
+                            for missing_agent_id in missing_agent_ids:
                                 for frame in frame_lst:
                                     missing_row = {col: 0 for col in X_slice.columns}  # Fill all columns with 0
-                                    missing_row['id'] = f"Missing_{missing_player}"  # Set the 'id' to the missing player's id
+                                    missing_row['id'] = missing_agent_id  # Set the 'id' to the missing player's id
                                     missing_row['frame_id'] = frame  # Set the frame_id for the current frame in the sequence
                                     missing_rows.append(missing_row)
-                                agents_order.append(f"Missing_{missing_player}") 
-
-                            # Create a DataFrame for the missing rows and append to the slice
-                            missing_df = pd.DataFrame(missing_rows)
-                            X_slice = pd.concat([X_slice, missing_df], ignore_index=True)
+                            if missing_rows:
+                                # Create a DataFrame for the missing rows and append to the slice
+                                missing_df = pd.DataFrame(missing_rows)
+                                X_slice = pd.concat([X_slice, missing_df], ignore_index=True)
                         
                         agents_order.append('ball')
 
@@ -377,8 +475,13 @@ class PressingSequenceDataset(Dataset):
                         # Get the features
                         x_tensor = torch.tensor(X_slice[self.feature_cols].values, dtype=torch.float32)
                         X_slice_pressing = X_slice[X_slice['is_ball_carrier']==True]['probability_to_intercept']
-                        X_slice_pressing = X_slice_pressing[pd.isna(X_slice_pressing)==False]
+                        X_slice_pressing = X_slice_pressing.dropna()
                         pressing_intensity_tensor = torch.tensor(np.stack(X_slice_pressing.map(lambda x: np.stack(x)).values), dtype=torch.float32)
+                        _, h, w = pressing_intensity_tensor.shape
+                        pad_h = num_team_players - h
+                        pad_w = num_team_players - w
+                        pressing_intensity_tensor = F.pad(pressing_intensity_tensor, (0, pad_w, 0, pad_h), "constant", 0)
+
                         x_tensor = x_tensor.reshape(-1, num_agents, len(self.feature_cols))
                         y_tensor = torch.tensor(label, dtype=torch.long)
                         
@@ -386,12 +489,15 @@ class PressingSequenceDataset(Dataset):
                         if x_tensor.isnan().any():
                             print("Find Nan", match_id, period_id, frame_id)
                             continue
-                        
+                        match_info = f"{match_id}-{period_id}-{frame_id}"
+
                         all_features_seqs.append(x_tensor)
                         all_pressintensity_seqs.append(pressing_intensity_tensor)
                         all_labels.append(y_tensor)
+                        all_pressed_ids.append(pressed_player)
                         all_presser_ids.append(pressing_player)    
                         all_agent_orders.append(agents_order)
+                        all_match_infos.append(match_info)
                     
                     except Exception as e:
                         period_id = row['period_id']
@@ -402,13 +508,19 @@ class PressingSequenceDataset(Dataset):
                 
                 self.pressintensity_seqs = all_pressintensity_seqs
                 self.labels = all_labels
+                self.pressed_ids = all_pressed_ids
                 self.presser_ids = all_presser_ids
                 self.agent_orders = all_agent_orders
+                self.match_infos = all_match_infos
 
     def _infer_feature_cols(self):
         ignore = ['game_id', 'period_id', 'timestamp', 'ball_owning_team_id']
         # return [col for col in self.total_df.columns if col not in ignore and self.total_df[col].dtype != 'O']
-        return ['x', 'y', 'vx', 'vy', 'v', 'ax', 'ay', 'a']
+        return ['x', 'y', 'vx', 'vy', 'v', 'ax', 'ay', 'a', 
+                'is_teammate', 'is_goalkeeper', 'distance_to_goal', 'sin_angle_to_goal',
+                'cos_angle_to_goal', 'distance_to_ball', 'sin_angle_to_ball',
+                'cos_angle_to_ball', 'cos_velocity_angle', 'sin_velocity_angle'
+            ]
 
     def __getitem__(self, idx):
         """
@@ -419,8 +531,10 @@ class PressingSequenceDataset(Dataset):
             'features': self.features_seqs[idx],       # Shape: [SeqLen, Agents, Features]
             'pressing_intensity': self.pressintensity_seqs[idx],         # Shape: [SeqLen, ?, ?] (Adjust shape based on data)
             'label': self.labels[idx],                   # Shape: [1] or scalar
+            'pressed_id': self.pressed_ids[idx],         # String (Player ID)
             'presser_id': self.presser_ids[idx],         # String (Player ID)
-            'agent_order': self.agent_orders[idx]        # List of Strings (Agent IDs in order)
+            'agent_order': self.agent_orders[idx],        # List of Strings (Agent IDs in order)
+            'match_info': self.match_infos[idx]
         }
     
     def __len__(self):
@@ -694,57 +808,44 @@ class exPressInputDataset(Dataset):
         """
         if self.loaded_data is None or idx >= len(self.loaded_data):
             raise IndexError("Index out of bounds or data not loaded")
-        features = self.loaded_data[idx]['features'][-1:, ...]
+        features = self.loaded_data[idx]['features']
         # Normalize
         features = (features - self.min_vals) / self.feature_ranges
 
-        pressing_intensity = self.loaded_data[idx]['pressing_intensity'][-1:, ...]
-        _, cur_players1, cur_players2 = pressing_intensity.shape
-        num_team_players = 11
-
-        if cur_players1 != num_team_players: #11
-            pad_d1 = num_team_players - cur_players1
-            # Pad second to last dimension (bottom)
-            pressing_intensity = F.pad(pressing_intensity, (0, 0, 0, pad_d1), mode='constant', value=0)
-        if cur_players2 != num_team_players:
-            pad_d2 = num_team_players - cur_players2
-            # Pad last dimension (right side)
-            pressing_intensity = F.pad(pressing_intensity, (0, pad_d2), mode='constant', value=0)
-
-        #  # --- 'features'에 Min-Max 정규화 적용 ---
-        # normalized_features = features.float() # 기본값은 원본 (정규화 파라미터가 없는 경우)
-        # if self.feature_min_vals is not None and self.feature_max_vals is not None:
-        #     # 정규화: (X - X_min) / (X_max - X_min)
-        #     # self.feature_ranges가 0인 경우 1.0으로 설정했으므로, 해당 피처는 (X - X_min) / 1.0 = 0 이 됩니다 (X==X_min 가정).
-        #     normalized_features = (features.float() - self.min_vals_bcast) / (self.feature_ranges + 1e-8) # 1e-8은 매우 작은 범위에 대한 안정성 추가
-        #     # 값의 범위를 [0, 1]로 클램핑할 수도 있습니다 (정밀도 문제 등으로 약간 벗어날 수 있음).
-        #     # normalized_features = torch.clamp(normalized_features, 0, 1)
-        # # --- 정규화 끝 ---
-        
+        pressing_intensity = self.loaded_data[idx]['pressing_intensity']
         label = self.loaded_data[idx]['label']
+        pressed_id = self.loaded_data[idx]['pressed_id']
         presser_id = self.loaded_data[idx]['presser_id']
         agent_order = self.loaded_data[idx]['agent_order']
+        match_info = self.loaded_data[idx]['match_info']
 
         return {
                 'features': features.float(),         # Shape: [T, A, F] e.g., [125, 23, 8]
                 'pressing_intensity': pressing_intensity.float(), # Shape: [T, 11, 11]
                 'label': label.float(),             # Shape: [1] or scalar
+                'pressed_id': pressed_id,           # String
                 'presser_id': presser_id,           # String
-                'agent_order': agent_order          # List
+                'agent_order': agent_order,        # List
+                'match_info': match_info
             }
 
 
 if __name__ == "__main__":
     data_path = "/data/MHL/bepro/processed"
-    save_path = "/data/MHL/pressing-intensity"
+    save_path = "/data/MHL/pressing-intensity-feat"
     os.makedirs(save_path, exist_ok=True)
     match_id_lst = os.listdir(data_path)
-    train_match_id_lst = match_id_lst[:-4]
-    test_match_id_lst = match_id_lst[-4:]
+    match_id_lst = [match_id for match_id in match_id_lst if match_id not in ["126319", "153381", "153390", "126285"]]
+    train_match_id_lst = match_id_lst[:-6]
+    valid_match_id_lst = match_id_lst[-6:-3]
+    test_match_id_lst = match_id_lst[-3:]
     train_dataset = PressingSequenceDataset(data_path, match_id_lst=train_match_id_lst)
+    valid_dataset = PressingSequenceDataset(data_path, match_id_lst=valid_match_id_lst)
     test_dataset = PressingSequenceDataset(data_path, match_id_lst=test_match_id_lst)
     with open(f"{save_path}/train_dataset.pkl", "wb") as f:
         pickle.dump(train_dataset, f)
+    with open(f"{save_path}/valid_dataset.pkl", "wb") as f:
+        pickle.dump(valid_dataset, f)
     with open(f"{save_path}/test_dataset.pkl", "wb") as f:
         pickle.dump(test_dataset, f)
     print("Done")

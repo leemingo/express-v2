@@ -7,7 +7,8 @@ import config as C
 from config import Constant, Column, Group
 
 import tarfile # zipfile 대신 tarfile을 임포트합니다.
-
+import torch
+from torch.nn.utils.rnn import pad_sequence
 
 
 def infer_ball_carrier(tracking_df, source='bepro'):
@@ -301,3 +302,50 @@ def archive_to_tar_gz(root_dir, file_suffix, output_tar_name):
 
     except Exception as e:
         print(f"\n❌ 압축 중 에러가 발생했습니다: {e}")
+
+
+def custom_temporal_collate(batch):
+    """
+    가변 길이의 시계열 데이터를 포함한 배치를 처리하는 collate_fn.
+    
+    Args:
+        batch (list): Dataset의 __getitem__이 반환하는 딕셔너리들의 리스트.
+                      예: [{'features': [T1,A,F], ...}, {'features': [T2,A,F], ...}]
+    """
+    # 1. 배치 내의 데이터들을 키(key)별로 분리하여 각각의 리스트에 담습니다.
+    features_list = [item['features'] for item in batch]
+    intensity_list = [item['pressing_intensity'] for item in batch]
+    labels_list = [item['label'] for item in batch]
+    
+    # 메타데이터
+    pressed_id_list = [item['pressed_id'] for item in batch]
+    presser_id_list = [item['presser_id'] for item in batch]
+    agent_order_list = [item['agent_order'] for item in batch]
+    match_info_list = [item['match_info'] for item in batch]
+
+     # 패딩 전, 각 시퀀스의 실제 길이를 저장합니다.
+    seq_lengths = torch.tensor([f.shape[0] for f in features_list], dtype=torch.long)
+    
+    # 2. torch.nn.utils.rnn.pad_sequence를 사용하여 시퀀스 데이터들을 패딩합니다.
+    #    batch_first=True는 결과 텐서의 첫 번째 차원이 배치 크기가 되도록 합니다.
+    #    [B, max_T, A, F] 형태가 됩니다.
+    padded_features = pad_sequence(features_list, batch_first=True, padding_value=0.0)
+    
+    # pressing_intensity도 동일하게 패딩합니다.
+    # [B, max_T, 11, 11] 형태가 됩니다.
+    padded_intensities = pad_sequence(intensity_list, batch_first=True, padding_value=0.0)
+
+    # 3. 크기가 고정된 텐서 데이터들은 torch.stack을 사용하여 묶습니다.
+    labels = torch.stack(labels_list)
+
+    # 4. 최종적으로, 처리된 데이터들을 담은 딕셔너리를 반환합니다.
+    return {
+        'features': padded_features,           # 패딩된 텐서
+        'pressing_intensity': padded_intensities, # 패딩된 텐서
+        'label': labels,           
+        'seq_lengths': seq_lengths,           # 배치된 텐서
+        'agent_order': agent_order_list,      # 파이썬 리스트
+        'presser_id': presser_id_list,        # 파이썬 리스트
+        'pressed_id': pressed_id_list,        # 파이썬 리스트
+        'match_info': match_info_list         # 파이썬 리스트
+    }

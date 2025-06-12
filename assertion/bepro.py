@@ -108,8 +108,6 @@ def convert_to_actions(events: pd.DataFrame) -> DataFrame[LSDPSchema]:
     actions["start_y"] = events.y
     actions["end_x"] = events.to_x
     actions["end_y"] = events.to_y
-    actions["relative_x"] = events.relative_x
-    actions["relative_y"] = events.relative_y
 
     actions = _fix_shot(actions, home_team_id=events[events["team"] == "Home"].team_id.iloc[0])
     actions = _fix_clearances(actions)
@@ -132,7 +130,7 @@ def _convert_locations(events: pd.DataFrame) -> None:
     is_home = events.team == "Home"
     flip_xy = (
         (is_home & (events['attack_direction'] == 'LEFT')) | # Home팀이 왼쪽으로 공격하고 있으면 flip
-        (is_home & (events['attack_direction'] == 'RIGHT')) # Home팀이 오른쪽으로 공격하고 있으면 flip
+        (~is_home & (events['attack_direction'] == 'RIGHT')) # Home팀이 오른쪽으로 공격하고 있으면 flip
     )
     events.loc[flip_xy, ['x', 'to_x']] = 1 - events.loc[flip_xy, ['x', 'to_x']].values
     events.loc[flip_xy, ['y', 'to_y']] = 1 - events.loc[flip_xy, ['y', 'to_y']].values
@@ -186,7 +184,7 @@ def _clean_events(df_events: pd.DataFrame, remove_event_types) -> pd.DataFrame:
     return df_events.reset_index(drop=True)
 
 def add_related_info(events):
-    events[['relative_player_id', 'relative_id', 'related_x', 'related_y', 'relative_event_time']] = np.nan
+    events[['relative_player_id', 'relative_id', 'relative_event_time']] = np.nan
     for i in range(len(events) - 1):
         cur = events.iloc[i]
         next = events.iloc[i+1:i+10] # 최소 10개 내 receive 이벤트를 찾음
@@ -208,8 +206,9 @@ def add_related_info(events):
                     events.at[i, 'relative_id'] = receival.iloc[0]['event_id']
                     events.at[i, 'relative_player_id'] = receival.iloc[0]['player_id']
                     events.at[i, 'relative_event_time'] = receival.iloc[0]['event_time']
-                    events.at[i, 'relative_x'] = cur['to_x']
-                    events.at[i, 'relative_y'] = cur['to_y']
+                    if pd.notna(events.at[i, 'to_x']) and pd.notna(events.at[i, 'to_y']):
+                        events.at[i, 'to_x'] = receival.iloc[0]['x']
+                        events.at[i, 'to_y'] = receival.iloc[0]['y']
             else:
                 print(f"No receival event found for pass: {cur.game_id}, event_id: {cur.event_id}, passer: {cur.player_name}, qualifier: {cur}")
         

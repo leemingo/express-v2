@@ -1,3 +1,4 @@
+import itertools
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.animation as animation
@@ -20,11 +21,20 @@ def plot_single_frame_positions(total_df, period_id, frame_idx, home_team_info, 
         away_team_info: Team object for the away team.
     """
     # Default team colors
-    team_colors = {"Home": "blue", "Away": "red", "Ball": "black"}
+    # team_colors = {"Home": "blue", "Away": "red", "Ball": "black"}
+    # team_colors = {"Home": "red", "Away": "black", "Ball": "orange"}
+    styles = {
+        "Home": {"facecolor": "red",    "edgecolor": "black"},
+        "Away": {"facecolor": "orange", "edgecolor": "red"},
+        "Ball": {"facecolor": "blue", "edgecolor": "black"}
+    }
 
     df = total_df[(total_df['period_id']==period_id) & (total_df['frame_id']==frame_idx)].copy()
     # Detect player IDs in the frame
     player_ids = df['id'].unique()
+    
+    home_map = {r.pID: r.jID for _, r in home_team_info.iterrows()}
+    away_map = {r.pID: r.jID for _, r in away_team_info.iterrows()}
     
     # Create team info dictionaries: key=player_id, value=[player.name, player.jersey_no]
     home_team_dict = {player['pID']: [player['player'], player['jID']] for _, player in home_team_info.iterrows()}
@@ -45,7 +55,7 @@ def plot_single_frame_positions(total_df, period_id, frame_idx, home_team_info, 
 
     fig, ax = pitch.draw()
     ax.set_title(f"Frame {frame_idx} Player Positions", fontsize=14)
-    
+    nodes = []
     # Plot each player's position and jersey number
     for pid in player_ids:
         x = df[df['id']==pid]["x"].iloc[0]
@@ -54,29 +64,47 @@ def plot_single_frame_positions(total_df, period_id, frame_idx, home_team_info, 
             continue  
         
         if pid in home_team_dict:
-            color = team_colors["Home"]
-            jersey_no = home_team_dict[pid][1]
+            # color = team_colors["Home"]
+            # jersey_no = home_team_dict[pid][1]
+            cat = "Home"; jersey = home_map[pid]
         elif pid in away_team_dict:
-            color = team_colors["Away"]
-            jersey_no = away_team_dict[pid][1]
+            # color = team_colors["Away"]
+            # jersey_no = away_team_dict[pid][1]
+             cat = "Away"; jersey = away_map[pid]
         elif "ball" in pid.lower():
-            color = team_colors["Ball"]
-            jersey_no = "" 
+            # color = team_colors["Ball"]
+            # jersey_no = "" 
+             cat = "Ball"; jersey = ""
         else:
-            color = "gray"
-            jersey_no = ""
-        
-        # Scatter plot for player position
-        ax.scatter(x, y, color=color, s=100, alpha=0.8)
-        if jersey_no != "":
-            ax.text(x, y, str(jersey_no), fontsize=7, fontweight="bold", color="white",
+            # color = "gray"
+            # jersey_no = ""
+            cat = None; jersey = ""
+         
+        style = styles.get(cat, {"facecolor":"gray","edgecolor":"black"})
+        #
+        #  Scatter plot for player position
+        # ax.scatter(x, y, color=color, s=100, alpha=0.8)
+        ax.scatter(x, y, facecolor=style["facecolor"],
+            edgecolor=style["edgecolor"],
+            s=100, alpha=0.8)
+        # if jersey_no != "":
+            # ax.text(x, y, str(jersey_no), fontsize=7, fontweight="bold", color="white",
+            #         ha="center", va="center")
+        if jersey:
+            ax.text(x, y, str(jersey), fontsize=7, fontweight="bold", color="white",
                     ha="center", va="center")
-    
+        nodes.append((x, y))
+    for (x1, y1), (x2, y2) in itertools.combinations(nodes, 2):
+        ax.plot(
+            [x1, x2], [y1, y2],
+            color='gray', linewidth=0.5, alpha=0.6, zorder=1
+        )    
+
     # Create legend: Home team, Away team, Ball (if necessary)
-    home_patch = mpatches.Patch(color=team_colors["Home"], label='Home')
-    away_patch = mpatches.Patch(color=team_colors["Away"], label='Away')
-    ball_patch = mpatches.Patch(color=team_colors["Ball"], label="Ball")
-    ax.legend(handles=[home_patch, away_patch, ball_patch], loc='upper right')
+    # home_patch = mpatches.Patch(color=team_colors["Home"], label='Home')
+    # away_patch = mpatches.Patch(color=team_colors["Away"], label='Away')
+    # ball_patch = mpatches.Patch(color=team_colors["Ball"], label="Ball")
+    # ax.legend(handles=[home_patch, away_patch, ball_patch], loc='upper right')
     
     plt.show()
 

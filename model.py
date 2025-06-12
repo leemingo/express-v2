@@ -8,8 +8,9 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F  # noqa: N812
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
 from torch_geometric.data import Data, Batch
-from torch_geometric.nn import GCNConv, global_mean_pool
+from torch_geometric.nn import GATConv, GCNConv, global_mean_pool
 from torch_geometric.utils import dense_to_sparse
 
 from torchmetrics.classification import BinaryAccuracy, BinaryAUROC
@@ -512,6 +513,89 @@ class TemporalSoccerMapModel(pl.LightningModule):
 
         return torch.optim.Adam(self.parameters(), **self.optimizer_params["optimizer_params"])
 
+class PressGNN(nn.Module):
+    def __init__(self,
+                model_config : dict,
+                 ): # Flag to use pressing intensity
+        super().__init__()
+        self.feature_dim = model_config['in_channels']
+        self.num_gnn_layers = model_config['num_gnn_layers']
+        self.gnn_hidden_dim = model_config['gnn_hidden_dim']
+        self.num_lstm_layers = model_config['num_lstm_layers']
+        self.lstm_hidden_dim = model_config['lstm_hidden_dim']
+        self.lstm_dropout = model_config['lstm_dropout']
+        self.lstm_bidirectional = model_config['lstm_bidirectional']
+        self.use_pressing_features = model_config['use_pressing_features']
+        self.gnn_heads = model_config['gnn_head']
+        
+        # GNN Layers (using edge_weight for pressure)
+        self.gnn_layers = nn.ModuleList()
+        in_c = self.feature_dim
+        # self.gnn_layers.append(GCNConv(self.feature_dim, self.gnn_hidden_dim)) # GCNConv can use edge_weight
+        for i in range(self.num_gnn_layers):
+            if i < self.num_gnn_layers - 1:
+                self.gnn_layers.append(
+                    GATConv(in_c, self.gnn_hidden_dim, heads=self.gnn_heads, concat=True)
+                )
+                in_c = self.gnn_hidden_dim * self.gnn_heads
+            else:
+                self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim, heads=1, concat=False)) # GCNConv can use edge_weight
+                in_c = self.gnn_hidden_dim
+
+        # Classifier Head
+        self.classifier = nn.Linear(self.gnn_hidden_dim, 1)
+
+    def forward(self, batch: Dict) -> torch.Tensor:
+        batch['features'] = batch['features'][:, -1:, ...]
+        B, T, A, F_in = batch['features'].shape
+        device = batch['features'].device
+        x_frames = batch['features'].reshape(B*T, A, F_in) # [B, A, T, F_in]
+        # node_repr = batch['features'].reshape(B * T, A, F_in)
+        agent_order_lst = batch['agent_order']
+        pressed_id_lst = batch['pressed_id']
+        
+        data_list = []
+        for i in range(B*T):
+            feats = x_frames[i]  # [A, temporal_hidden_dim]
+            adj = torch.ones((A, A), device=device) - torch.eye(A, device=device)
+            edge_index, edge_weight = dense_to_sparse(adj)
+
+            # 2. 결정된 edge_index를 기반으로 엣지 특징을 계산합니다.
+            source_nodes, dest_nodes = edge_index[0], edge_index[1]
+            # 2-1. 특징: distance_between_nodes
+            # feats의 첫 두 컬럼이 x, y 좌표
+            pos_source = feats[source_nodes, :2]
+            pos_dest = feats[dest_nodes, :2]
+            edge_distances = torch.linalg.norm(pos_source - pos_dest, dim=1).unsqueeze(1)
+
+            # 2-2. 특징: is_same_team (인덱스 기반으로 계산)
+            # 홈팀: 인덱스 0~10, 원정팀: 인덱스 11~21
+            source_is_home = source_nodes < 11
+            dest_is_home = dest_nodes < 11
+            source_is_away = (source_nodes >= 11) & (source_nodes < 22)
+            dest_is_away = (dest_nodes >= 11) & (dest_nodes < 22)
+            
+            # 같은 팀인 경우: (둘 다 홈팀) 또는 (둘 다 원정팀)
+            is_same = (source_is_home & dest_is_home) | (source_is_away & dest_is_away)
+            edge_same_team = is_same.float().unsqueeze(1)
+
+            edge_attr = torch.cat([edge_distances, edge_same_team], dim=-1)
+
+            data_list.append(Data(x=feats, edge_index=edge_index, edge_attr=edge_attr))    
+
+        batch_graph = Batch.from_data_list(data_list)
+        # Spatial GNN: apply each layer
+        x = batch_graph.x
+        for conv in self.gnn_layers:
+            x = conv(x, batch_graph.edge_index, batch_graph.edge_attr)
+            x = torch.relu(x)
+        
+        # Global Pooling
+        pooled = global_mean_pool(x, batch_graph.batch)     # [B, gnn_hidden_dim]
+        logits = self.classifier(pooled).squeeze(-1)  # [B]
+        return logits
+
+
 class STLSTMGNN(nn.Module):
     def __init__(self,
                 model_config : dict,
@@ -525,69 +609,94 @@ class STLSTMGNN(nn.Module):
         self.lstm_dropout = model_config['lstm_dropout']
         self.lstm_bidirectional = model_config['lstm_bidirectional']
         self.use_pressing_features = model_config['use_pressing_features']
+        self.gnn_heads = model_config['gnn_head']
         
+        # GNN Layers (using edge_weight for pressure)
+        self.gnn_layers = nn.ModuleList()
+        in_c = self.feature_dim
+        # self.gnn_layers.append(GCNConv(self.feature_dim, self.gnn_hidden_dim)) # GCNConv can use edge_weight
+        for i in range(self.num_gnn_layers):
+            if i < self.num_gnn_layers - 1:
+                self.gnn_layers.append(
+                    GATConv(in_c, self.gnn_hidden_dim, heads=self.gnn_heads, concat=True)
+                )
+                in_c = self.gnn_hidden_dim * self.gnn_heads
+            else:
+                self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim, heads=1, concat=False)) # GCNConv can use edge_weight
+                in_c = self.gnn_hidden_dim
+
         # LSTM Layer
+        self.num_directions = 2 if self.lstm_bidirectional else 1
         self.lstm = nn.LSTM(
-            input_size=self.feature_dim,
+            input_size=self.gnn_hidden_dim,
             hidden_size=self.lstm_hidden_dim, num_layers=self.num_lstm_layers, batch_first=True,
             dropout=self.lstm_dropout if self.num_lstm_layers > 1 else 0, bidirectional=self.lstm_bidirectional)
 
-        # GNN Layers (using edge_weight for pressure)
-        self.gnn_layers = nn.ModuleList()
-        self.num_directions = 2 if self.lstm_bidirectional else 1
-        in_c = self.lstm_hidden_dim * self.num_directions
-        for _ in range(self.num_gnn_layers):
-            self.gnn_layers.append(GCNConv(in_c, self.gnn_hidden_dim)) # GCNConv can use edge_weight
-            in_c = self.gnn_hidden_dim
-
+        
         # Classifier Head
-        self.classifier = nn.Linear(self.gnn_hidden_dim, 1)
+        self.classifier = nn.Linear(self.lstm_hidden_dim * self.num_directions, 1)
 
     def forward(self, batch: Dict) -> torch.Tensor:
-        batch['features'] = batch['features'][:, -60:, ...]
+        batch['features'] = batch['features']
         B, T, A, F_in = batch['features'].shape
         device = batch['features'].device
+        x_frames = batch['features'].reshape(B*T, A, F_in) # [B, A, T, F_in]
+        # node_repr = batch['features'].reshape(B * T, A, F_in)
+        agent_order_lst = batch['agent_order']
+        pressed_id_lst = batch['pressed_id']
+        
+        data_list = []
+        for i in range(B*T):
+            feats = x_frames[i]  # [A, temporal_hidden_dim]
+            if self.use_pressing_features:
+                agent_order = agent_order_lst[i]
+                pressed_id = pressed_id_lst[i] 
+                pressed_idx = agent_order.index(pressed_id)    
+                avg_press = batch['pressing_intensity'].mean(dim=1) # [B, 11, 11]
 
-        # Temporal encoder
-        x_frames = batch['features'].permute(0, 2, 1, 3)
-        x_frames = x_frames.reshape(B * A, T, F_in)
-        lstm_out, (h_n, _) = self.lstm(x_frames)  # h_n: [1, B*A, hidden]
-        if self.lstm_bidirectional:
-            # h_n.shape == [num_layers * 2, B*N, H]
-            h_n = h_n.view(self.num_lstm_layers, 2, B*A, -1)   # -> [num_layers, 2, B*N, H]
-            last_layer = h_n[-1]                    # -> [2, B*N, H]
-            h_fwd, h_bwd = last_layer[0], last_layer[1]
-            node_repr = torch.cat([h_fwd, h_bwd], dim=1)  # [B*N, 2H]
-            node_repr = node_repr.reshape(B, A, -1)
-        else:
-            node_repr = h_n[-1].reshape(B, A, -1)  # [B, A, temporal_hidden_dim]
-        # Spatial encoder
-        if self.use_pressing_features:
-            avg_press = batch['pressing_intensity'].mean(dim=1) # [B, 11, 11]
-            P, O = avg_press.size(1), avg_press.size(2) # P: number of players, O: number of opponents
-            # Build batch of graphs with pressing intensity as edge features
-            data_list = []
-            for i in range(B):
-                feats = node_repr[i]  # [N, 2H]
-                # Dense edge attribute matrix
+                P, O = avg_press.size(1), avg_press.size(2) # P: number of players, O: number of opponents
                 W = torch.zeros((A, A), device=device)
                 # presser nodes: first P, opponent nodes: next O
                 W[:P, P:P+O] = avg_press[i]
                 W[P:P+O, :P] = avg_press[i].t()
-                # ball (last node) edges remain zeros
 
-                edge_index, edge_attr = dense_to_sparse(W)
-                data_list.append(Data(x=feats, edge_index=edge_index, edge_attr=edge_attr))
+                # Ball
+                ball_idx = 22 # Index of ball is always 22
+                W[:, ball_idx] = W[:, pressed_idx]
+                W[ball_idx, :] = W[pressed_idx, :]
 
-        else:
-            # Build batch of fully connected graphs including ball
-            data_list = []
-            for i in range(B):
-                feats = node_repr[i]    # [A, temporal_hidden]
-                # Fully connected adjacency (no self-loops)
+                edge_index, _ = dense_to_sparse(adj)
+                press_attr = W[edge_index[0], edge_index[1]]
+            else:
                 adj = torch.ones((A, A), device=device) - torch.eye(A, device=device)
                 edge_index, edge_weight = dense_to_sparse(adj)
-                data_list.append(Data(x=feats, edge_index=edge_index, edge_attr=edge_weight))
+
+            # 2. 결정된 edge_index를 기반으로 엣지 특징을 계산합니다.
+            source_nodes, dest_nodes = edge_index[0], edge_index[1]
+            # 2-1. 특징: distance_between_nodes
+            # feats의 첫 두 컬럼이 x, y 좌표
+            pos_source = feats[source_nodes, :2]
+            pos_dest = feats[dest_nodes, :2]
+            edge_distances = torch.linalg.norm(pos_source - pos_dest, dim=1).unsqueeze(1)
+
+            # 2-2. 특징: is_same_team (인덱스 기반으로 계산)
+            # 홈팀: 인덱스 0~10, 원정팀: 인덱스 11~21
+            source_is_home = source_nodes < 11
+            dest_is_home = dest_nodes < 11
+            source_is_away = (source_nodes >= 11) & (source_nodes < 22)
+            dest_is_away = (dest_nodes >= 11) & (dest_nodes < 22)
+            
+            # 같은 팀인 경우: (둘 다 홈팀) 또는 (둘 다 원정팀)
+            is_same = (source_is_home & dest_is_home) | (source_is_away & dest_is_away)
+            edge_same_team = is_same.float().unsqueeze(1)
+
+            if self.use_pressing_features:
+                edge_attr = torch.cat([edge_distances, edge_same_team, press_attr.unsqueeze(1)], dim=-1)
+            else:
+                # 거리, 팀여부 2가지 특징 결합
+                edge_attr = torch.cat([edge_distances, edge_same_team], dim=-1)
+
+            data_list.append(Data(x=feats, edge_index=edge_index, edge_attr=edge_attr))    
 
         batch_graph = Batch.from_data_list(data_list)
         # Spatial GNN: apply each layer
@@ -599,8 +708,27 @@ class STLSTMGNN(nn.Module):
         # Global Pooling
         pooled = global_mean_pool(x, batch_graph.batch)     # [B, gnn_hidden_dim]
         
-        logits = self.classifier(pooled).squeeze(-1)  # [B]
+        # Temporal encoder
+        lstm_input = pooled.view(B, T, self.gnn_hidden_dim)
+        seq_lengths = batch['seq_lengths']
+        packed_input = pack_padded_sequence(
+            lstm_input, 
+            seq_lengths.cpu(), # 길이는 CPU 텐서여야 합니다.
+            batch_first=True, 
+            enforce_sorted=False
+        )
+        lstm_out, (h_n, _) = self.lstm(packed_input)  # h_n: [1, B*A, hidden]
+        # lstm_out, (h_n, _) = self.lstm(x_frames)  # h_n: [1, B*A, hidden]
+        if self.lstm_bidirectional:
+            h_fwd = h_n[-2, :, :]
+            h_bwd = h_n[-1, :, :]
+            final_hidden = torch.cat([h_fwd, h_bwd], dim=1)  # [B*N, 2H]
+        else:
+            final_hidden = h_n[-1, :, :]
+        
+        logits = self.classifier(final_hidden).squeeze(-1)  # [B]
         return logits
+
 
         
 
@@ -610,7 +738,8 @@ class exPressModel(pl.LightningModule):
         self.save_hyperparameters()
 
         # Instantiate the new GNN+LSTM model
-        self.model = STLSTMGNN(model_config=model_config)
+        # self.model = STLSTMGNN(model_config=model_config)
+        self.model = PressGNN(model_config=model_config)
         
         # self.criterion = nn.BCELoss()
         # self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([8.0]))
