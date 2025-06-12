@@ -5,6 +5,9 @@ import pandas as pd
 import os
 from tqdm import tqdm
 import re
+import fire
+from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 #Visualization
 os.chdir('..')
@@ -350,61 +353,63 @@ def flatten_df(merged_df, teams_df):
     return melted_df
 
 
-def sum_pitch_control(merged_df, teams_df, radius_m = 4.0):
+def single_event_pitch_control(event_id, event_df_dict, params, radius_m):
+    try:
+        event_df = pd.DataFrame(event_df_dict[event_id])
+        PPCFa, xgrid, ygrid = pc.generate_pitch_control_for_event(
+            event_df.iloc[0], event_df, params,
+            field_dimen=(C.PITCH_X_MAX - C.PITCH_X_MIN, C.PITCH_Y_MAX - C.PITCH_Y_MIN),
+            n_grid_cells_x=52, n_grid_cells_y=34, offsides=False,
+        )
+        ball_x = event_df.iloc[0]['ballx']
+        ball_y = event_df.iloc[0]['bally']
+        X, Y = np.meshgrid(xgrid, ygrid)
+        distance = np.sqrt((X - ball_x)**2 + (Y - ball_y)**2)
+        final_mask = (distance <= radius_m) & (~np.isnan(PPCFa))
+        summed = PPCFa[final_mask].sum() if np.any(final_mask) else 0.0
+        return {"event_id": event_id, "summed_pitch_control": summed}
+    except Exception as e:
+        print(f"[event_id {event_id}] pitch control 계산 실패: {e}")
+        return {"event_id": event_id, "summed_pitch_control": 0.0}
+
+
+def sum_pitch_control(merged_df, teams_df, radius_m=4.0):
     params = pc.default_model_params()
     melted_df = flatten_df(merged_df, teams_df)
+
+    # ➤ event_id별로 분할해서 전달 가능한 dict로 만들어줌
+    event_df_dict = defaultdict(list)
+    for row in melted_df.to_dict(orient='records'):
+        event_df_dict[row['event_id']].append(row)
+
+    event_ids = list(event_df_dict.keys())
     results = []
-    
-    for event_id in tqdm(melted_df["event_id"].unique()):
-        event_df = melted_df[melted_df["event_id"] == event_id].copy()
-        summed = 0.0  # 기본값
 
-        try:        
-            PPCFa, xgrid, ygrid = pc.generate_pitch_control_for_event(
-                event_df.iloc[0], event_df, params, 
-                field_dimen=(C.PITCH_X_MAX-C.PITCH_X_MIN, C.PITCH_Y_MAX-C.PITCH_Y_MIN,), 
-                n_grid_cells_x=52, n_grid_cells_y=34, offsides=False, #52.2
-            )        
-                
-            ball_x = event_df.iloc[0]['ballx']
-            ball_y = event_df.iloc[0]['bally']
-
-            # 1. xgrid, ygrid로 meshgrid 만들기 → 전체 셀의 좌표 (2D)
-            X, Y = np.meshgrid(xgrid, ygrid)  # shape = (rows, cols)
-
-            # 2. 각 셀 중심과 공 위치 간 거리 계산
-            distance = np.sqrt((X - ball_x)**2 + (Y - ball_y)**2)
-
-            # 3. radius 안에 있는 셀 마스크
-            in_radius_mask = distance <= radius_m
-
-            # 4. 유효한 셀 마스크 (NaN 제외)
-            valid_mask = ~np.isnan(PPCFa)
-
-            # 5. 두 조건 모두 만족하는 셀만 합산
-            final_mask = in_radius_mask & valid_mask
-            summed = PPCFa[final_mask].sum()
-
-        except Exception as e:
-            print(f"[event_id {event_id}] pitch control 계산 실패: {e}")
-
-        results.append({
-            "summed_pitch_control": summed
-        })
-    return pd.DataFrame(results)
-    
+    with ProcessPoolExecutor() as executor:
+        futures = {
+            executor.submit(single_event_pitch_control, eid, event_df_dict, params, radius_m): eid
+            for eid in event_ids
+        }
+        for future in tqdm(as_completed(futures), total=len(futures)):
+            results.append(future.result())
+    results_df = pd.DataFrame(results).sort_values("event_id").reset_index(drop=True)
+    return results_df
 
 
-if __name__=="__main__":
+def run(radius_m=4.0):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
     traces_file = os.path.join(current_dir, 'notebook', 'traces_df.csv')
     teams_file = os.path.join(current_dir, 'notebook', 'teams.csv')
 
     traces_df = pd.read_csv(traces_file)
     traces_df['event_id'] = traces_df.index
-    
+
     teams = pd.read_csv(teams_file)
 
-    
-    # pitch control 값 구하기
-    result = sum_pitch_control(traces_df.iloc[:100,:], teams)
+    result = sum_pitch_control(traces_df.iloc[:100, :], teams, radius_m=radius_m)
     print(result)
+    # result.to_csv('pitch_control_result.csv', index=False)
+
+if __name__ == "__main__":
+    fire.Fire(run)
