@@ -55,13 +55,13 @@ def parse_kleague_data(data_path, match_id):
 
     raw_events = events.reset_index(drop=True)
     raw_events["event_id"] = range(len(events))
+    # player정보는 재매핑
     raw_events = raw_events[['event_id', 'period_type', 'period_name', 'period_order', 
                             'period_duration', 'period_start_time', 'event_time', 
                             'team_name', 'events', 'x', 'y', 'to_x', 'to_y', 'attack_direction']]
     
-    merge_events = parse_events.merge(raw_events, how="left")
-
-    return merge_events
+    # parse에서도 event_id를 처음에 생성하므로 event_id를 기준으로 병합 가능
+    return raw_events.merge(parse_events, on="event_id", how="left")
 
 def load_and_save_data():
     match_id_lst = [id for id in os.listdir(data_path) if "DS" not in id] # DF_Stores: acOS에서 Finder가 해당 폴더의 메타데이터를 저장하기 위해 자동으로 생성하는 숨김 파일

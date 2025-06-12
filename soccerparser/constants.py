@@ -1,9 +1,10 @@
 class Constants:
     def __init__(self):
-        self.PITCH_SIZE = (104, 68)
+        self.PITCH_SIZE = (105, 68)
 
         self.EVENT_HEADER = ["event_id", "session", "time", "home_away", "player_code", "event_types"]
 
+        # VALID_TYPES: 온 더 볼 플레이..
         # self.VALID_TYPES = {
         #     "cornerKick",
         #     "freeKick",
@@ -43,21 +44,22 @@ class Constants:
         #     "foulCommitted",
         # }
 
+        # 검사할 이벤트만 정의
         self.VALID_TYPES = {
-            "Aerial Control",
+            #"Aerial Control",
             "Blocks",
             "Clearances",
             "Crosses",
             "Crosses Received",
-            "Defensive Line Supports",
-            "Duels",
+            #"Defensive Line Supports",
+            #"Duels",
             "Fouls",
-            "Goals Conceded",
+            #"Goals Conceded",
             #"HIR",
             #"MAX_SPEED",
             "Mistakes",
-            "Offsides",
-            "Own Goals",
+            #"Offsides",
+            #"Own Goals",
             "Passes",
             "Passes Received",
             "Recoveries",
@@ -67,9 +69,9 @@ class Constants:
             "Set Pieces",
             "Shots & Goals",
             "Step-in",
-            "Tackles",
+            #"Tackles",
             "Take-on",
-            "Turnover",
+            #"Turnover",
             #"VHIR",
         }
 
