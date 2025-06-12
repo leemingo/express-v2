@@ -38,7 +38,7 @@ class player(object):
     
     # Pass in the line for that player (from 360 data), their team name(e.g. home/away), default params and if they are goalkeeper or not
     def __init__(self,team,teamname,params,GK, off, actor):
-        if GK == 'TW':#'GK':
+        if GK == 'GK':
             self.is_gk = True
         else:
             self.is_gk = False
@@ -235,7 +235,7 @@ def generate_pitch_control_for_event(event, locations, params, field_dimen = (10
         
     count = 0
     # calculate pitch pitch control model at each location on the pitch
-    for i in range( len(ygrid) ):
+    for i in range(len(ygrid) ):
         for j in range( len(xgrid) ):
             target_position = np.array( [xgrid[j], ygrid[i]] )
             PPCFa[i,j],PPCFd[i,j] = calculate_pitch_control_at_target(target_position, att_players, def_players, ball_start_pos, params)
