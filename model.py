@@ -723,9 +723,9 @@ class exPressModel(pl.LightningModule):
         
         # self.criterion = nn.BCELoss()
         # self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([8.0]))
-        # pos_weight_tensor = torch.tensor([4.0]) 
-        # self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
-        self.criterion = nn.BCEWithLogitsLoss()
+        pos_weight_tensor = torch.tensor([4.0]) 
+        self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
+        # self.criterion = nn.BCEWithLogitsLoss()
 
         self.optimizer_params = optimizer_params
 

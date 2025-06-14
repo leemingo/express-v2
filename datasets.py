@@ -848,8 +848,8 @@ class exPressInputDataset(Dataset):
         # Min-Max Normalization
         features = (features - self.min_vals) / self.feature_ranges
         
-        # used_feature_ids = [i for i in range(18) if i not in [2, 3, 4, 5, 6, 7, 16, 17]] # For feature selection
-        # features = features[...,  used_feature_ids]  # For feature selection
+        used_feature_ids = [i for i in range(18) if i not in [2, 3, 4, 5, 6, 7, 16, 17]] # For feature selection
+        features = features[...,  used_feature_ids]  # For feature selection
         features = features[-1:, ...] # Using one frame
         # pressing_intensity = self.loaded_data[idx]['pressing_intensity']
         pressing_intensity = self.loaded_data[idx]['pressing_intensity'][-1:, ...] # Using one frame
