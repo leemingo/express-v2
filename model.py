@@ -687,7 +687,123 @@ class STLSTMGNN(nn.Module):
         return logits
 
         
+class LSTMGNN(nn.Module):
+    """
+    Temporal-first (per-player LSTM) + Spatial-second (GNN) architecture.
+    """
+    def __init__(self, model_config: dict):
+        super().__init__()
 
+        # ----- config -----
+        self.in_channels      = model_config['in_channels']        # F_in
+        self.lstm_hidden_dim  = model_config['lstm_hidden_dim']
+        self.num_lstm_layers  = model_config['num_lstm_layers']
+        self.lstm_dropout     = model_config['lstm_dropout']
+        self.bidirectional    = model_config['lstm_bidirectional']
+        self.num_gnn_layers   = model_config['num_gnn_layers']
+        self.gnn_hidden_dim   = model_config['gnn_hidden_dim']
+        self.gnn_heads        = model_config['gnn_head']
+
+        # ----- LSTM (per player) -----
+        common_kwargs = dict(
+            input_size   = self.in_channels,
+            hidden_size  = self.lstm_hidden_dim,
+            num_layers   = self.num_lstm_layers,
+            batch_first  = True,
+            dropout      = self.lstm_dropout,
+            bidirectional= self.bidirectional
+        )
+        self.rnn_type = "lstm"
+        if self.rnn_type == "gru":
+            self.rnn = nn.GRU(**common_kwargs)
+        elif self.rnn_type == "lstm":
+            self.rnn = nn.LSTM(**common_kwargs)
+        else:
+            raise ValueError(f"Unsupported rnn_type: {self.rnn_type}")
+
+        # ----- GNN -----
+        self.num_dirs = 2 if self.bidirectional else 1
+        in_c = self.lstm_hidden_dim * self.num_dirs
+        self.gnn_layers = nn.ModuleList()
+        for i in range(self.num_gnn_layers):
+            if i < self.num_gnn_layers - 1:
+                self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim,
+                                            heads=self.gnn_heads, concat=True))
+                in_c = self.gnn_hidden_dim * self.gnn_heads
+            else:
+                self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim, heads=1, concat=False))
+                in_c = self.gnn_hidden_dim
+
+        # ----- Classifier -----
+        self.classifier = nn.Linear(self.gnn_hidden_dim, 1) 
+
+    def forward(self, batch: dict) -> torch.Tensor:
+        """
+        batch:
+            features: [B, T_max, A, F_in]
+            seq_lengths: [B]  (valid lengths, 동일 길이 → A 선수 모두 공유)
+        """
+        x, seq_lens = batch['features'], batch['seq_lengths']     # shapes as above
+        B, T_max, A, F_in = x.shape # (B, T, A, F)
+        device = x.device
+
+        # ---------- 1) per-player LSTM ---------- #
+        #   reshape → [B*A, T_max, F_in]
+        x_flat = x.permute(0, 2, 1, 3).reshape(B*A, T_max, F_in)
+
+        #   length 벡터: 각 선수 동일 → 반복
+        lengths_flat = seq_lens.repeat_interleave(A).cpu()
+        packed = pack_padded_sequence(
+            x_flat, lengths_flat, batch_first=True, enforce_sorted=False
+        )
+        rnn_out  = self.rnn(packed)
+    
+        # hidden state 꺼내기
+        if self.rnn_type == "lstm":
+            h_n = rnn_out[1][0]          # (h_n, c_n) 중 h_n
+        else:  # gru
+            h_n = rnn_out[1]             # rnn_out = (output, h_n)
+
+        if self.bidirectional:
+            player_emb = torch.cat([h_n[-2], h_n[-1]], dim=1)     # [B*A, 2H]
+        else:
+            player_emb = h_n[-1]                                       # [B*A, H]
+        player_emb = player_emb.reshape(B, A, -1)              # [B, A, H_lstm*D]
+
+        # ---------- 2) build graph & run GNN ---------- #
+        data_list = []
+        for b in range(B):
+            # positional 정보: 마지막 valid frame 기준
+            t_last = seq_lens[b] - 1
+            pos = x[b, t_last, :, :2]                   # [A, 2]  (x, y)
+
+            # fully-connected (자유롭게 수정 가능)
+            adj = torch.ones(A, A, device=device) - torch.eye(A, device=device)
+            edge_index, _ = dense_to_sparse(adj)
+
+            # edge_attr: [distance | same_team]
+            source_nodes, dest_nodes = edge_index[0], edge_index[1]
+            
+            same_team = (((source_nodes < 11) & (dest_nodes < 11)) |
+                         ((source_nodes >= 11) & (source_nodes < 22) & (dest_nodes >= 11) & (dest_nodes < 22))
+                        ).float().unsqueeze(1)
+        
+            edge_attr = torch.cat([same_team], dim=1)  # [E, 1]
+
+            data_list.append(
+                Data(x=player_emb[b], edge_index=edge_index, edge_attr=edge_attr)
+            )
+
+        batch_graph = Batch.from_data_list(data_list)
+        x_g = batch_graph.x
+        for conv in self.gnn_layers:
+            x_g = torch.relu(conv(x_g, batch_graph.edge_index, batch_graph.edge_attr))
+
+        # ---------- 3) pooling & head ---------- #
+        graph_repr = global_mean_pool(x_g, batch_graph.batch)  # [B, gnn_hidden_dim]
+        logits = self.classifier(graph_repr).squeeze(-1)       # [B]
+        return logits
+        
 class exPressModel(pl.LightningModule):
     def __init__(self, model_config: dict = None, optimizer_params: dict = None):
         super().__init__()
