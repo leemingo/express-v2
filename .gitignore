@@ -1,9 +1,10 @@
 *.mp4
-
-
+*.csv
+*.pkl
 # Log files and directories
 logs/
 *.log
+*.tar.gz
 
 # Compiled Python files and cache
 __pycache__/

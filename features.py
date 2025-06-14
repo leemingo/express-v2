@@ -14,29 +14,38 @@ os.chdir('..')
 import config as C
 current_dir = os.path.dirname(__file__)
 
+__all__ = ['distance_ball_goal', 'distance_ball_sideline', 'distance_ball_goalline']
+
 def distance_ball_goal(merged_df):
-    goal_x = np.where(merged_df['attack_direction'] == 'RIGHT', C.PITCH_X_MAX, C.PITCH_X_MIN)
+    goal_x = np.where(merged_df['team'] == 'Home', C.PITCH_X_MAX, C.PITCH_X_MIN)
     goal_y = 0  # 양쪽 골대 y좌표는 동일
     dx = goal_x - merged_df['ball_x']
     dy = goal_y - merged_df['ball_y']
     distance = np.sqrt(dx**2 + dy**2)
-    return pd.DataFrame({'distance_ball_goal' : distance},index=merged_df.index)
+
+    return pd.DataFrame({
+        'distance_ball_goal': distance
+    }, index=merged_df.index)
 
 def distance_ball_sideline(merged_df):
     ball_sideline = np.minimum(merged_df['ball_y'] - C.PITCH_Y_MIN, C.PITCH_Y_MAX - merged_df['ball_y'])   
     
-    return pd.DataFrame({'distance_ball_sideline' : ball_sideline },index=merged_df.index)
+    return pd.DataFrame({
+        'distance_ball_sideline' : ball_sideline 
+    },index=merged_df.index)
 
 def distance_ball_goalline(merged_df):
-    goaline_x = np.where(merged_df['attack_direction'] == 'RIGHT', C.PITCH_X_MIN, C.PITCH_X_MAX)
+    goaline_x = np.where(merged_df['team'] == 'Home', C.PITCH_X_MIN, C.PITCH_X_MAX)
     ball_goaline = np.abs(goaline_x - merged_df['ball_x'])
     
-    return pd.DataFrame({'distance_ball_goalline' : ball_goaline},index=merged_df.index)
+    return pd.DataFrame({
+        'distance_ball_goalline' : ball_goaline},
+    index=merged_df.index)
 
 def get_actor_speed(merged_df):
     actor_speeds = np.full(len(merged_df), np.nan)
 
-    for idx, row in tqdm(merged_df.iterrows(), total=len(merged_df)):
+    for i, (_, row) in enumerate(merged_df.iterrows()):
         xID = row.player_code
         vx, vy = row.get(f"{xID}_vx", np.nan), row.get(f"{xID}_vy", np.nan)  # ← 오타 수정
 
@@ -44,131 +53,175 @@ def get_actor_speed(merged_df):
             continue
 
         speed = np.sqrt(vx ** 2 + vy ** 2)  # ← np.sqrt(x^2 + y^2)
-        actor_speeds[idx] = speed
+        actor_speeds[i] = speed
 
-    return pd.DataFrame({'actor_speed': actor_speeds}, index=merged_df.index)
+    return pd.DataFrame({
+        'actor_speed': actor_speeds},
+        index=merged_df.index)
 
 def angle_to_goal(merged_df):
-    goal_x = np.where(merged_df['attack_direction'] == 'RIGHT', C.PITCH_X_MAX, C.PITCH_X_MIN)
+    goal_x = np.where(merged_df['team'] == 'Home', C.PITCH_X_MAX, C.PITCH_X_MIN)
     goal_y = 0  # 골대는 항상 중앙 y좌표
 
     dx = goal_x - merged_df['ball_x']
     dy = goal_y - merged_df['ball_y']
     angle = np.degrees(np.arctan2(dy, dx))
 
-    return pd.DataFrame({'angle_to_goal' : angle },index=merged_df.index)
-
-
-def safe_to_timedelta(series: pd.Series) -> pd.Series:
-    """
-    모든 값을 Timedelta로 변환한다.
-    """
-    def _convert(x):
-        if isinstance(x, pd.Timedelta):          # 그대로
-            return x
-        elif isinstance(x, pd.Timestamp):        # 날짜 → 그날 00:00 기준 경과
-            return x - x.normalize()
-        elif isinstance(x, str):                 # '0 days …' 같은 문자열
-            try:
-                return pd.to_timedelta(x)
-            except ValueError:
-                return pd.NaT
-        else:
-            return pd.NaT                        # 기타(숫자 등)
-
-    return series.apply(_convert)
+    return pd.DataFrame({
+        'frame_id': merged_df['frame_id'],
+        'angle_to_goal' : angle },
+    index=merged_df.index)
 
 def compute_time_elapsed(merged_df):
     # timestamp → timedelta 변환
-    converted_timestamps = pd.to_timedelta(merged_df['timestamp'], errors='coerce')
-    seconds = converted_timestamps.dt.total_seconds()
+    result = merged_df['time_seconds']
+    return pd.DataFrame({
+        'elapsed_time': result}, 
+    index=merged_df.index)
 
-    # 전반 종료, 후반 시작 간 시간차 계산
-    first_half_end = seconds[merged_df['period_id'] == 1].max()
-    second_half_start = seconds[merged_df['period_id'] == 2].min()
-    offset = first_half_end - second_half_start
+def time_since_last_opponent_action(merged_df, event_df):
 
-    # 후반전만 offset 추가
-    seconds_adjusted = seconds.copy()
-    seconds_adjusted[merged_df['period_id'] == 2] += offset
+    time_since_opponent_action = pd.Series(0.0, index=merged_df.index)
 
-    return pd.DataFrame({'elapsed_time': seconds_adjusted}, index=merged_df.index)
+    all_teams = pd.concat([merged_df['tID'], event_df['tID']]).unique()
 
-def time_since_last_opponent_action(merged_df):
-    # 누적 시간 컬럼 계산
-    merged_df = merged_df.copy()
-    merged_df['elapsed_time'] = compute_time_elapsed(merged_df)
+    for current_team_id in all_teams:
+        current_team_merged = merged_df[merged_df['tID'] == current_team_id].sort_values(by='time_seconds')
 
-    result = []
+        opponent_events = event_df[event_df['tID'] != current_team_id].sort_values(by='time_seconds')
 
-    for idx, row in merged_df.iterrows():
-        current_time = row['elapsed_time']
-        current_team = row['tID']
+        if not current_team_merged.empty and not opponent_events.empty:
+            # merge_asof를 사용하여 각 현재 팀 이벤트 시간 이전의 가장 최근 상대 팀 이벤트 시간을 찾습니다.
+            # 'direction='backward''는 current_time보다 같거나 작은 가장 최근의 값을 찾으라는 의미입니다.
+            merged_result = pd.merge_asof(
+                current_team_merged,
+                opponent_events[['time_seconds']].rename(columns={'time_seconds': 'last_opponent_time'}),
+                left_on='time_seconds',
+                right_on='last_opponent_time',
+                direction='backward',
+                suffixes=('', '_opponent') # 접미사를 사용하여 컬럼 이름 충돌 방지
+            )
 
-        # 상대 팀 이벤트 중 현재 시간보다 이전 것만 필터링
-        opponent_events = merged_df[(merged_df['tID'] != current_team) &
-                                 (merged_df['elapsed_time'] < current_time)]
-
-        if not opponent_events.empty:
-            last_opponent_time = opponent_events['elapsed_time'].max()
-            time_diff = current_time - last_opponent_time
-        else:
-            time_diff = 0.0
-
-        result.append(time_diff)
-
-    return pd.DataFrame({'time_since_last_opponent_action': result}, index=merged_df.index)
-
-
-def is_goal(qual_list):
-    for d in qual_list:
-        if (
-            d.get('event_name') == 'Shots & Goals'
-            and d.get('property', {}).get('Outcome') == 'Goals'
-        ):
-            return True
-    return False
-
-def cumul_goal(merged_df) -> pd.DataFrame:
-    merged_df = merged_df.copy()
-    merged_df['events'] = merged_df['events'].apply(ast.literal_eval)
-
-    merged_df['is_goal'] = merged_df['events'].apply(is_goal)
-
-    # 누적 골 초기화
-    def_goal_count = np.zeros(len(merged_df), dtype=int)
-    att_goal_count = np.zeros(len(merged_df), dtype=int)
-
-    # 팀별로 누적 골 인덱싱
-    for team in merged_df['tID'].unique():
-        is_att = merged_df['tID'] == team
-        is_def = ~is_att
-
-        att_goal = merged_df['is_goal'] & is_att
-        def_goal = merged_df['is_goal'] & is_def
-
-        att_cumsum = att_goal.cumsum()
-        def_cumsum = def_goal.cumsum()
-
-        att_goal_count[is_att] = att_cumsum[is_att].shift(fill_value=0)
-        def_goal_count[is_att] = def_cumsum[is_att].shift(fill_value=0)
+            # 계산된 시간 차이를 원래 merged_df의 해당 인덱스에 할당
+            # NaN 값은 상대 팀 액션이 없었음을 의미하므로 0으로 처리 (또는 다른 기본값)
+            time_diff = merged_result['time_seconds'] - merged_result['last_opponent_time'].fillna(merged_result['elapsed_time'])
+            time_since_opponent_action.loc[current_team_merged.index] = time_diff.values
+        # else: 상대 팀 이벤트가 없거나 현재 팀 이벤트가 없으면 0.0으로 유지 (초기화 값)
 
     return pd.DataFrame({
-        'def_goal_count': def_goal_count,
-        'att_goal_count': att_goal_count
-    }, index=merged_df.index)
+        'time_since_last_opponent_action': time_since_opponent_action
+    }, index=merged_df_original.index)
 
-def goaldiff(merged_df):
-    df = cumul_goal(merged_df)
-    df['goal_diff'] = df['att_goal_count'] - df['def_goal_count']
-    return df[['goal_diff']]
+
+def _prepare_event_data_for_cumul_goals(event_df_original: pd.DataFrame) -> pd.DataFrame:
+
+    event_df = event_df_original.copy()
+    event_df['time_seconds'] = pd.to_numeric(event_df['time_seconds'], errors='coerce')
+    event_df['is_goal'] = (
+        (event_df['type_name'] == 'Shot') &
+        (event_df['result_name'] == 'Goal')
+    )
+    return event_df.sort_values(by='time_seconds')
+
+def cumul_goal_att(merged_df, events_df) -> pd.DataFrame:
+
+    # past_events_for_point가 비어있으면 0으로 채워진 결과를 반환합니다.
+    if merged_df.empty:
+        # B를 알 수 없으므로, 길이가 1인 더미 DataFrame 반환 (호출부에서 처리하도록)
+        return pd.DataFrame({'att_goal_count': [np.nan]}, index=[merged_df.index.min() if not merged_df.empty else 0])
+
+    event_df_prepared = _prepare_event_data_for_cumul_goals(events_df) # 여기서 매번 호출하면 비효율적!
+    
+    current_point_tID = merged_df['tID'].iloc[0]
+    current_point_time_seconds = merged_df['time_seconds'].max() # 해당 배치 내 가장 최근 시간
+
+    # 현재 팀의 골 이벤트만 필터링합니다.
+    current_team_goals = event_df_prepared[
+        (event_df_prepared['tID'] == current_point_tID) & (event_df_prepared['is_goal'])
+    ].copy()
+
+    # 각 골 이벤트에 대해 시간 순서대로 누적 합계를 계산합니다.
+    if not current_team_goals.empty:
+        current_team_goals['cumulative_goals'] = 1
+        current_team_goals['cumulative_goals'] = current_team_goals['cumulative_goals'].cumsum()
+    else:
+        # 골이 없다면 빈 DataFrame에 cumulative_goals 컬럼만 추가
+        current_team_goals['cumulative_goals'] = pd.Series(dtype=int)
+
+    temp_df = pd.DataFrame({'time_seconds': [current_point_time_seconds], 'tID': [current_point_tID]})
+    merged_att_goals = pd.merge_asof(
+        temp_df,
+        current_team_goals[['time_seconds', 'cumulative_goals']],
+        left_on='time_seconds',
+        right_on='time_seconds',
+        direction='backward'
+    )
+
+    att_count = merged_att_goals['cumulative_goals'].fillna(0).astype(int).iloc[0]
+    
+    B = len(merged_df) # `past_events`의 실제 B 값
+    return pd.DataFrame({'att_goal_count': np.full((B,), att_count)}, index=merged_df.index)
+
+
+def cumul_goal_def(merged_df, events_df) -> pd.DataFrame:
+    
+    event_df_prepared = _prepare_event_data_for_cumul_goals(events_df)
+
+    current_point_tID = merged_df['tID'].iloc[0]
+    current_point_time_seconds = merged_df['time_seconds'].max()
+
+    all_tids_in_events = event_df_prepared['tID'].unique()
+    opponent_team_ids = [tid for tid in all_tids_in_events if tid != current_point_tID]
+
+    if not opponent_team_ids: # 상대 팀이 없는 경우
+        B = len(merged_df)
+        return pd.DataFrame({'def_goal_count': np.full((B,), 0)}, index=merged_df.index)
+
+    # 상대 팀의 골 이벤트만 필터링합니다.
+    opponent_goals = event_df_prepared[
+        (event_df_prepared['tID'].isin(opponent_team_ids)) & (event_df_prepared['is_goal'])
+    ].copy()
+
+    if not opponent_goals.empty:
+        opponent_goals['cumulative_goals'] = 1
+        opponent_goals['cumulative_goals'] = opponent_goals['cumulative_goals'].cumsum()
+    else:
+        opponent_goals['cumulative_goals'] = pd.Series(dtype=int)
+
+    temp_df = pd.DataFrame({'time_seconds': [current_point_time_seconds], 'tID': [current_point_tID]})
+    merged_def_goals = pd.merge_asof(
+        temp_df,
+        opponent_goals[['time_seconds', 'cumulative_goals']],
+        left_on='time_seconds',
+        right_on='time_seconds',
+        direction='backward'
+    )
+
+    def_count = merged_def_goals['cumulative_goals'].fillna(0).astype(int).iloc[0]
+    
+    B = len(merged_df)
+    return pd.DataFrame({'def_goal_count': np.full((B,), def_count)}, index=merged_df.index)
+
+def goaldiff(merged_df, events_df) -> pd.DataFrame:
+
+    if merged_df.empty:
+        # 비어있을 경우 NaN으로 채워진 결과 반환 (update_features에서 처리)
+        return pd.DataFrame({'goal_diff': [np.nan]}, index=[merged_df.index.min() if not merged_df.empty else 0])
+
+    att_goals_df = cumul_goal_att(merged_df, full_events_df)
+    def_goals_df = cumul_goal_def(merged_df, full_events_df)
+
+    goal_diff_series = att_goals_df['att_goal_count'] - def_goals_df['def_goal_count']
+    
+    # 결과를 단일 열 DataFrame으로 반환
+    return pd.DataFrame({'goal_diff': goal_diff_series}, index=merged_df.index)
 
 
 def get_closest_defender_info(merged_df):
     # 결과 저장 리스트
     ids, xs, ys, vxs, vys, speeds, dists = ([] for _ in range(7))
 
-    for _, row in tqdm(merged_df.iterrows(), total=len(merged_df)):
+    for _, row in merged_df.iterrows():
         ball_x, ball_y = row['ball_x'], row['ball_y']
         team_prefix   = row['player_code'][0]          # 'H' 또는 'A'
         defender_pref = 'A' if team_prefix == 'H' else 'H'
@@ -203,6 +256,7 @@ def get_closest_defender_info(merged_df):
 
     # 결과 DataFrame (merged_df와 같은 index 사용)
     return pd.DataFrame({
+        'frame_id' : merged_df['frame_id'],
         'closest_defender_id'   : ids,
         'closest_defender_x'    : xs,
         'closest_defender_y'    : ys,
@@ -229,7 +283,7 @@ def get_speed_diff_actor_defender(merged_df):
     results_df = get_closest_defender_info(merged_df)    
     actor_speeds_series = get_actor_speed(merged_df)['actor_speed']
 
-    # 속도 차이 계산, closest_defender_speed는 results_df에 있음음.
+    # 속도 차이 계산, closest_defender_speed는 results_df에 있음.
     speed_diff = actor_speeds_series - results_df['closest_defender_speed']
     
     return pd.DataFrame(speed_diff, columns=['speed_diff_actor_defender'], index=merged_df.index)
@@ -245,7 +299,7 @@ def nb_of_m_radius(merged_df, dist=3.0):
 
     counts = []
 
-    for _, row in tqdm(merged_df.iterrows(), total=len(merged_df)):
+    for _, row in merged_df.iterrows():
         actor_team = row['player_code'][0]          # 'H' 또는 'A'
         opponent_cols = away_cols if actor_team == 'H' else home_cols
 
@@ -278,14 +332,19 @@ def get_dist_defender_to_sideline(merged_df):
     results_df = get_closest_defender_info(merged_df) # 최단거리 수비수 x, y 좌표 사용
        
     sideline_dist = np.minimum(results_df['closest_defender_y']-C.PITCH_Y_MIN, C.PITCH_Y_MAX - results_df['closest_defender_y'])
-    return sideline_dist.to_frame(name='dist_defender_to_sideline')
+    return pd.DataFrame({        
+        'dist_defender_to_sideline': sideline_dist
+    }, index=merged_df.index)
 
 # --- 5. 공에 가장 가까운 수비수와 골라인 사이의 거리 ---
 def get_dist_defender_to_goaline(merged_df):
     results_df = get_closest_defender_info(merged_df) # 최단거리 수비수 x, y 좌표 사용
-    def_goal_x = np.where(merged_df['attack_direction'] == 'RIGHT', C.PITCH_X_MAX, C.PITCH_X_MIN)
+    def_goal_x = np.where(merged_df['team'] == 'Home', C.PITCH_X_MAX, C.PITCH_X_MIN)
     goaline_dist = np.abs(def_goal_x - results_df['closest_defender_x'])
-    return goaline_dist.to_frame(name='dist_defender_to_goaline')
+
+    return pd.DataFrame({
+        'dist_defender_to_goaline': goaline_dist
+    }, index=merged_df.index)
 
 # --- 6. (공에 가장 가까운 수비수와 사이드라인 사이의 거리, 공과 사이드라인 사이의 거리), 두 거리의 차이 ---
 def get_diff_ball_defender_sideline(merged_df):
@@ -299,9 +358,9 @@ def get_diff_ball_defender_sideline(merged_df):
     
     diff = ball_to_sideline - defender_to_sideline
     
-    return pd.DataFrame(diff, columns=['diff_ball_defender_sideline'], index=merged_df.index)
-
-
+    return pd.DataFrame({
+        'diff_ball_defender_sideline': diff
+    }, index=merged_df.index)
 
 def flatten_df(merged_df, teams_df):
     
@@ -393,8 +452,8 @@ def sum_pitch_control(merged_df, teams_df, radius_m=4.0):
         for future in tqdm(as_completed(futures), total=len(futures)):
             results.append(future.result())
     results_df = pd.DataFrame(results).sort_values("event_id").reset_index(drop=True)
-    return results_df
 
+    return results_df
 
 def run(radius_m=4.0):
     current_dir = os.path.dirname(os.path.abspath(__file__))
