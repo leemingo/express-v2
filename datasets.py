@@ -893,7 +893,7 @@ if __name__ == "__main__":
         pickle.dump(train_dataset, f)
 
     valid_dataset = PressingSequenceDataset(data_path, match_id_lst=valid_ids)    
-    with open(f"{save_path}/train_dataset.pkl", "wb") as f:
+    with open(f"{save_path}/valid_dataset.pkl", "wb") as f:
         pickle.dump(valid_dataset, f)
 
     test_dataset = PressingSequenceDataset(data_path, match_id_lst=test_ids)

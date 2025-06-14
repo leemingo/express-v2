@@ -15,8 +15,6 @@ import config as C
 current_dir = os.path.dirname(__file__)
 
 def distance_ball_goal(merged_df):
-    ```
-    `
     goal_x = np.where(merged_df['team'] == 'Home', C.PITCH_X_MAX, C.PITCH_X_MIN)
     goal_y = 0  # 양쪽 골대 y좌표는 동일
     dx = goal_x - merged_df['ball_x']
@@ -360,24 +358,18 @@ def get_diff_ball_defender_sideline(merged_df):
 
 def flatten_df(merged_df, teams_df):
     
-    teams_df["tracking_id"] = teams_df.apply(
-        lambda t: f'{t["team"][0]}{t["xID"]:02d}', 
-        axis=1
-    )
     team_sheets_lookup = {
-        row["tracking_id"]: {
-            "player_id": row["player_id"],
-            "team_id":   row["team_id"],
+        row["player_code"]: {
+            "player_id": row["pID"],
+            "team_id":   row["tID"],
             "position":  row["position"],
             "team": row["team"]
-        }
-        for _, row in teams_df.iterrows()
-    }
-    
+         }    for _, row in teams_df.iterrows()
+    }    
     melted = []
     tracking_ids = [col[:-2] for col in merged_df.columns if re.fullmatch(r'[HA]\d{2}_x', col)]
     for i, row in enumerate(tqdm(merged_df.itertuples(), total=len(merged_df))):
-        event_id = row.event_id
+        event_id = row.action_id
         period_id = row.period_id
 
         for base_id in tracking_ids:
@@ -445,11 +437,11 @@ def sum_pitch_control(merged_df, teams_df, radius_m=4.0):
             executor.submit(single_event_pitch_control, eid, event_df_dict, params, radius_m): eid
             for eid in event_ids
         }
-        for future in tqdm(as_completed(futures), total=len(futures)):
+        for future in as_completed(futures):
             results.append(future.result())
     results_df = pd.DataFrame(results).sort_values("event_id").reset_index(drop=True)
 
-    return results_df
+    return results_df.iloc[:, 1].values.astype(np.float32).reshape(-1, 1)
 
 def run(radius_m=4.0):
     current_dir = os.path.dirname(os.path.abspath(__file__))
