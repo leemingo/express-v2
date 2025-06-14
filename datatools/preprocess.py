@@ -25,6 +25,7 @@ def merge(tracking_df, event_df, teams_dict):
     teams_df.reset_index(drop=True, inplace=True)
     teams_df['player_code'] = teams_df.apply(lambda row: row['team'][0] + str(row['xID']).zfill(2), axis=1)
     
+    event_df = event_df.dropna(subset=['player_id']) 
     event_df['player_id'] = event_df['player_id'].astype(int).astype(str)
     event_df = event_df.merge(teams_df, how='left', left_on='player_id', right_on='pID')
     events = event_df.drop(['player_id', 'team_id'], axis=1)
@@ -46,7 +47,7 @@ def merge(tracking_df, event_df, teams_dict):
     wide_tracking_df.columns = [f'{player_code}_{value}' for value, player_code in wide_tracking_df.columns]
     wide_tracking_df.reset_index(inplace=True)
 
-    return events, wide_tracking_df
+    return events, wide_tracking_df, teams_df
 
 def time_set(events, wide_tracking_df):
     # Event 시간 조정
@@ -96,14 +97,15 @@ if __name__ == "__main__":
     processed_data_path = "/home/exPress/express-v2/data/bepro/processed"
     os.makedirs(processed_data_path, exist_ok=True)
 
-    match_ids = os.listdir(raw_data_path)
+    match_ids = sorted(os.listdir(raw_data_path))
     for match_id in tqdm(match_ids):
         try:
             print(f"▶ Processing match: {match_id}")
             tracking_df, event_df, teams_dict = data_collect(match_id)
-            events, wide_tracking_df = merge(tracking_df, event_df, teams_dict)
+            events, wide_tracking_df, teams_df = merge(tracking_df, event_df, teams_dict)
             traces_df = time_set(events, wide_tracking_df)
             traces_df = left_right_inversion(traces_df)
+            teams_df.to_csv(f"{processed_data_path}/{match_id}/{match_id}_teams.csv", index=False)
             wide_tracking_df.to_csv(f"{processed_data_path}/{match_id}/{match_id}_traces.csv", index=False)
             traces_df.to_csv(f"{processed_data_path}/{match_id}/{match_id}_merged.csv", index=False)
             print(f"✔ Saved: {match_id}")

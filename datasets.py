@@ -43,7 +43,6 @@ class PressingSequenceDataset(Dataset):
         self.feature_cols = feature_cols if feature_cols else self._infer_feature_cols()
         # Load and process data to create samples
         self.cols_to_flip = ['x', 'y', 'vx', 'vy', 'ax', 'ay']
-        self.loaded_data = [] 
         self._load_data()
     
     def _normalize_coordinate_direction(self, df, home_team_id):
@@ -140,7 +139,7 @@ class PressingSequenceDataset(Dataset):
                 "Cannot determine ball ownership change."
             )
             
-        return subset['ball_owning_team_id'].nunique() > 1           
+        return subset['ball_owning_team_id'].nunique() > 1            
     
     def _check_pressing_success(self, row, event_df, teams_dict):
         possession_gained_events = ['pass', 'dribble', 'recovery', 'interception',
@@ -154,7 +153,6 @@ class PressingSequenceDataset(Dataset):
             pressing_team = teams_dict['Home']['tID'].unique()[0]
 
         check_timegap = pd.Timedelta(seconds=5)
-
         window_events = event_df[
             (event_df['period_id'] == row['period_id']) &
             (event_df['time_seconds'] >= row['timestamp']) &
@@ -176,23 +174,22 @@ class PressingSequenceDataset(Dataset):
         else:
             return False
 
+    
     def _preprocess_event_df(self, event_df, teams_df):
         event_df['time_seconds'] = (event_df['time_seconds'] / 0.04).round() * 0.04
         event_df['relative_time_seconds'] = (event_df['relative_time_seconds'] / 0.04).round() * 0.04
         event_df['time_seconds'] = pd.to_timedelta(event_df['time_seconds'], unit='s')
         event_df['relative_time_seconds'] = pd.to_timedelta(event_df['relative_time_seconds'], unit='s')
-        event_df['player_id'] = event_df['player_id'].astype(int).astype(str)
+        event_df['player_id'] = event_df['player_id'].astype(str)
         
         teams_df.reset_index(drop=True, inplace=True)
         teams_df['player_code'] = teams_df.apply(lambda row : row['team'][0] + str(row['xID']).zfill(2), axis=1)
-
         event_df = event_df.merge(
             teams_df,
             how='left',
             left_on='player_id',
             right_on='pID'
         )
-
         return event_df
     
     def _merge_tracking_pressing_df(self, tracking_df, pressing_df, teams_df):
@@ -302,7 +299,7 @@ class PressingSequenceDataset(Dataset):
         df['sin_velocity_angle'] = np.clip(cross_product / denominator, -1.0, 1.0)
         
         return df
-       
+    
     def _load_data(self):
         total_dfs = []
         first_frames_list = []
@@ -314,36 +311,34 @@ class PressingSequenceDataset(Dataset):
         all_presser_ids = []
         all_agent_orders = []
         all_match_infos = []
-        if os.path.exists(self.data_path):
+        if os.path.exists(self.data_path):  
             total_dict = {match_id : {} for match_id in self.match_id_lst}
-            for match_id in tqdm(self.match_id_lst, desc=f"Loading {self.data_path} data"):
+            for match_id in self.match_id_lst:
                 
                 print(f"Load match_id : {match_id}")
                 total_dict[match_id] = {}
                 with open(f"{data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
                     match_dict = pickle.load(f)
-
                 tracking_df = match_dict['tracking_df'].copy()
+                
                 teams_dict = match_dict['teams'].copy()
                 home_team = teams_dict['Home'].copy()
                 away_team = teams_dict['Away'].copy()
                 teams_df = pd.concat([home_team, away_team])
                 meta_data = match_dict['meta_data']
-
                 # Make the direction unified.
+                
                 tracking_df = self._normalize_coordinate_direction(tracking_df, teams_dict['Home']['pID'].iloc[0])
                 
                 with open(f"{data_path}/{match_id}/{match_id}_presing_intensity.pkl", "rb") as f:
                     pressing_df = pickle.load(f)
 
-                # Loading and Preprocessing event data.
                 event_df = pd.read_csv(f"{data_path}/{match_id}/valid_events_filtered.csv")                
+                # Preprocessing event data.
                 event_df = self._preprocess_event_df(event_df, teams_df)
             
                 total_df = self._merge_tracking_pressing_df(tracking_df, pressing_df, teams_df)
 
-                total_df = pd.merge(tracking_df, pressing_df, on=['game_id', 'period_id', 'timestamp', 'frame_id'], how='left')
-                total_df = total_df[total_df['ball_state'] != 'dead'] # Need to be considered more.
                 total_dict[match_id]['tracking_df'] = total_df
                 total_dict[match_id]['event_df'] = event_df
                 total_dict[match_id]['meta_data'] = meta_data
@@ -351,24 +346,21 @@ class PressingSequenceDataset(Dataset):
                 total_dict[match_id]['Away'] = match_dict['teams']['Away']
 
                 # ball carrier에 대해 pressing intensity가 0.9보다 큰 경우 pressed_df 구성
-                # ball_carrier_df: 스키마
-                # "row": 홈 팀 player_id, "column": 어웨이 팀 player_id
-                # "probability_to_intercept"(len(row), len(column)): row(Home선수) - column(어웨이 선수)형태의 matrix로 각 선수가 상대팀 선수에게 가하는 압박 강도
                 pressed_dict = {}
-                ball_carrier_df = total_df[total_df['is_ball_carrier'] == True].copy() # ball carrier가 있는 프레임만 추출: 압박 상황 검출하기 위함(압박 강도, 속도)
-                ball_carrier_df.sort_values('frame_id', inplace=True)
-                for idx, row in tqdm(ball_carrier_df.iterrows(), desc= "Get Pressing Intensity"):#, miniters=len(ball_carrier_df)//10):                    
-                    if len(np.where(row['rows'] == row['id'])[0]) != 0: # 홈 팀에 ball carrier가 있는 경우
+                ball_carrier_df = total_df[total_df['is_ball_carrier'] == True].copy()
+                ball_carrier_df.sort_values(['period_id', 'frame_id'], inplace=True)
+                for idx, row in tqdm(ball_carrier_df.iterrows(), desc= "Get Pressing Intensity", miniters=len(ball_carrier_df)//10):
+                    if len(np.where(row['rows'] == row['id'])[0]) != 0:
                         pressed_axis = 'rows'
                         presser_axis = 'columns'
-                        id_loc = np.where(row[pressed_axis] == row['id'])[0]  # 행에 존재하는 ball carrier 인덱스
+                        id_loc = np.where(row[pressed_axis] == row['id'])[0]
                         # 다중 list nested 구조로 되어 있을 수 있으므로 tolist()를 두 번 적용
-                        pressing_values = row['probability_to_intercept'][id_loc].tolist()[0].tolist() # ball carrier가 홈 팀에 있는 경우, 원정 선수들에 대한 압박 강도
-                    elif len(np.where(row['columns'] == row['id'])[0]) != 0: # 어웨이 팀에 ball carrier가 있는 경우
+                        pressing_values = row['probability_to_intercept'][id_loc].tolist()[0].tolist()
+                    elif len(np.where(row['columns'] == row['id'])[0]) != 0:
                         pressed_axis = 'columns'
                         presser_axis = 'rows'
-                        id_loc = np.where(row[pressed_axis] == row['id'])[0] # 행에 존재하는 ball carrier 인덱스
-                        pressing_values = [x[id_loc] for x in row['probability_to_intercept']] # ball carrier가 어웨이 팀에 있는 경우, 홈 선수들에 대한 압박 강도
+                        id_loc = np.where(row[pressed_axis] == row['id'])[0]
+                        pressing_values = [x[id_loc] for x in row['probability_to_intercept']]
                     else:
                         continue
                     if max(pressing_values) > 0.9:
@@ -411,12 +403,7 @@ class PressingSequenceDataset(Dataset):
 
                 first_frames_list.append(first_frames_df)
 
-                # 딕셔너리 생성: period_id별로 추출하여 저장 (lookup table: search space 최적화)
-                events_by_period = {period: df for period, df in event_df.groupby('period_id')}
-                tracking_by_period = {period: df for period, df in total_df.groupby('period_id')}
-
-                print("\nGet Samples from first frames:", len(first_frames_df))
-                for _, row in tqdm(first_frames_df.iterrows(), desc= "Get Samples"):#, miniters=len(first_frames)//10):
+                for _, row in tqdm(first_frames_df.iterrows(), desc= "Get Samples", miniters=len(first_frames)//10):
                     try:
                         period_id = row['period_id']
                         frame_id = row['frame_id']
@@ -424,33 +411,22 @@ class PressingSequenceDataset(Dataset):
                         label = int(row['ball_ownership_changed'])
                         pressed_player = row['id']
                         pressing_player = row['pressing_player']
-
-                        # 압박이 시작하는 시점 이전 5초 동안 발생한 이벤트
-                        event_period_df = events_by_period.get(period_id)
-                        window_event_df = event_period_df[
-                            (event_period_df['time_seconds'] >= timestamp - pd.Timedelta(seconds=5)) &
-                            (event_period_df['time_seconds'] <= timestamp)
+                        window_event_df = event_df[
+                            (event_df['period_id'] == period_id) &
+                            (event_df['time_seconds'] >= timestamp - pd.Timedelta(seconds=5)) &
+                            (event_df['time_seconds'] <= timestamp)
                         ]
-                        # window_event_df = event_df[
-                        #     (event_df['period_id'] == period_id) &
-                        #     (event_df['time_seconds'] >= timestamp - pd.Timedelta(seconds=5)) &
-                        #     (event_df['time_seconds'] <= timestamp)
-                        # ]
                         
                         timestamps_list = window_event_df['time_seconds'].unique().tolist() + [timestamp]
-                        # X_slice: 압박이 시작하는 시점 이전 5초 동안의 트래킹 데이터
-                        # --- tracking 데이터 lookup ---
-                        tracking_period_df = tracking_by_period.get(period_id)
-                        X_slice = tracking_period_df[tracking_period_df['timestamp'].isin(timestamps_list)].copy()
-                        # X_slice = total_df[(total_df['period_id'] == period_id) & (total_df['timestamp'].isin(timestamps_list))].copy()
+                        X_slice = total_df[(total_df['period_id'] == period_id) & (total_df['timestamp'].isin(timestamps_list))].copy()
+                        
                         # Always press left -> right
-                        # If pressed players' team is home, flip: carrier가 홈팀에 있는 경우, 좌우 대칭(압박하는 팀이 항상 왼쪽에서 오른쪽으로 공격)
+                        # If pressed players' team is home, flip
                         if X_slice.loc[(X_slice['frame_id']==frame_id) & (X_slice['is_ball_carrier']==True)]['team_id'].iloc[0] == match_dict['teams']['Home']['tID'].iloc[0]:
                             for col in self.cols_to_flip:
                                 X_slice.loc[:, col] = -X_slice.loc[:, col]
 
                         # Get Features
-                        # frame/에이전트 별 feature생성: 
                         X_slice = X_slice.set_index('frame_id').groupby('frame_id', group_keys=False).apply(self._generate_features)
                         X_slice.reset_index(inplace=True)
 
@@ -492,9 +468,7 @@ class PressingSequenceDataset(Dataset):
                         
                         agents_order.append('ball')
 
-                        #X_slice.loc[:, 'id'] = pd.Categorical(X_slice['id'], categories=agents_order, ordered=True)
-                        X_slice['id'] = pd.Categorical(X_slice['id'], categories=agents_order, ordered=True)
-
+                        X_slice.loc[:, 'id'] = pd.Categorical(X_slice['id'], categories=agents_order, ordered=True)
                         # Sort the players by their ID to maintain a consistent order
                         X_slice = X_slice.sort_values(by=['frame_id', 'id'])
                 
@@ -542,7 +516,11 @@ class PressingSequenceDataset(Dataset):
     def _infer_feature_cols(self):
         ignore = ['game_id', 'period_id', 'timestamp', 'ball_owning_team_id']
         # return [col for col in self.total_df.columns if col not in ignore and self.total_df[col].dtype != 'O']
-        return ['x', 'y', 'vx', 'vy', 'v', 'ax', 'ay', 'a']
+        return ['x', 'y', 'vx', 'vy', 'v', 'ax', 'ay', 'a', 
+                'is_teammate', 'is_goalkeeper', 'distance_to_goal', 'sin_angle_to_goal',
+                'cos_angle_to_goal', 'distance_to_ball', 'sin_angle_to_ball',
+                'cos_angle_to_ball', 'cos_velocity_angle', 'sin_velocity_angle'
+            ]
 
     def __getitem__(self, idx):
         """
@@ -553,10 +531,12 @@ class PressingSequenceDataset(Dataset):
             'features': self.features_seqs[idx],       # Shape: [SeqLen, Agents, Features]
             'pressing_intensity': self.pressintensity_seqs[idx],         # Shape: [SeqLen, ?, ?] (Adjust shape based on data)
             'label': self.labels[idx],                   # Shape: [1] or scalar
+            'pressed_id': self.pressed_ids[idx],         # String (Player ID)
             'presser_id': self.presser_ids[idx],         # String (Player ID)
             'agent_order': self.agent_orders[idx],        # List of Strings (Agent IDs in order)
             'match_info': self.match_infos[idx]
         }
+
     def __setitem__(self, idx, data):
         if idx < 0 or idx >= len(self.features_seqs):
             raise IndexError(f"Index {idx} out of bounds for dataset length {len(self.features_seqs)}")
@@ -892,21 +872,32 @@ class exPressInputDataset(Dataset):
                 'presser_id': presser_id,           # String
                 'agent_order': agent_order          # List
             }
-
 if __name__ == "__main__":
     current_dir = os.path.dirname(__file__)
     data_path = os.path.join(current_dir, "data/bepro/processed")
     save_path = os.path.join(current_dir, "data/bepro/pressing_intensity")
     os.makedirs(save_path, exist_ok=True)
 
-    match_id_lst = sorted(os.listdir(data_path))
-    train_match_id_lst = match_id_lst[:20]
-    test_match_id_lst = match_id_lst[20:25]
-    train_dataset = PressingSequenceDataset(data_path, match_id_lst=train_match_id_lst)
-    test_dataset = PressingSequenceDataset(data_path, match_id_lst=test_match_id_lst)
+    exclude_ids = ['126319', '153381', '153390', '126285']
+    valid_ids = ['126476', '153364', '153373']
+    test_ids = ['153379', '153385', '153387']
+
+    match_id_lst = sorted([
+        match_id for match_id in os.listdir(data_path)
+        if match_id not in exclude_ids
+    ])
+
+    # 이후 로직은 동일하게 유지
+    train_dataset = PressingSequenceDataset(data_path, match_id_lst=match_id_lst[:30])    
     with open(f"{save_path}/train_dataset.pkl", "wb") as f:
         pickle.dump(train_dataset, f)
+
+    valid_dataset = PressingSequenceDataset(data_path, match_id_lst=valid_ids)    
+    with open(f"{save_path}/train_dataset.pkl", "wb") as f:
+        pickle.dump(valid_dataset, f)
+
+    test_dataset = PressingSequenceDataset(data_path, match_id_lst=test_ids)
     with open(f"{save_path}/test_dataset.pkl", "wb") as f:
         pickle.dump(test_dataset, f)
+
     print("Done")
-    

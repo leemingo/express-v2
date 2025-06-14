@@ -14,9 +14,9 @@ os.chdir('..')
 import config as C
 current_dir = os.path.dirname(__file__)
 
-__all__ = ['distance_ball_goal', 'distance_ball_sideline', 'distance_ball_goalline']
-
 def distance_ball_goal(merged_df):
+    ```
+    `
     goal_x = np.where(merged_df['team'] == 'Home', C.PITCH_X_MAX, C.PITCH_X_MIN)
     goal_y = 0  # 양쪽 골대 y좌표는 동일
     dx = goal_x - merged_df['ball_x']
@@ -80,14 +80,11 @@ def compute_time_elapsed(merged_df):
     index=merged_df.index)
 
 def time_since_last_opponent_action(merged_df, event_df):
-
     time_since_opponent_action = pd.Series(0.0, index=merged_df.index)
-
     all_teams = pd.concat([merged_df['tID'], event_df['tID']]).unique()
 
     for current_team_id in all_teams:
         current_team_merged = merged_df[merged_df['tID'] == current_team_id].sort_values(by='time_seconds')
-
         opponent_events = event_df[event_df['tID'] != current_team_id].sort_values(by='time_seconds')
 
         if not current_team_merged.empty and not opponent_events.empty:
@@ -104,9 +101,8 @@ def time_since_last_opponent_action(merged_df, event_df):
 
             # 계산된 시간 차이를 원래 merged_df의 해당 인덱스에 할당
             # NaN 값은 상대 팀 액션이 없었음을 의미하므로 0으로 처리 (또는 다른 기본값)
-            time_diff = merged_result['time_seconds'] - merged_result['last_opponent_time'].fillna(merged_result['elapsed_time'])
+            time_diff = merged_result['time_seconds'] - merged_result['last_opponent_time'].fillna(merged_result['time_seconds'])
             time_since_opponent_action.loc[current_team_merged.index] = time_diff.values
-        # else: 상대 팀 이벤트가 없거나 현재 팀 이벤트가 없으면 0.0으로 유지 (초기화 값)
 
     return pd.DataFrame({
         'time_since_last_opponent_action': time_since_opponent_action
