@@ -40,29 +40,6 @@ def distance_ball_goal(merged_df):
         'distance_ball_goal': distance
     }, index=merged_df.index)
     
-def distance_ball_sideline(merged_df):
-    """
-    각 이벤트 시점의 공과 가장 가까운 사이드라인(측면 라인) 사이의 거리를 계산합니다.
-
-    Args:
-        merged_df (pd.DataFrame): 'ball_y' 컬럼을 포함하는 DataFrame.
-
-    Returns:
-        pd.Series: 'distance_ball_sideline' 피처를 담은 Series.
-    """
-    # 공의 Y 좌표가 상단 사이드라인 (PITCH_Y_MAX)과 하단 사이드라인 (PITCH_Y_MIN) 중 어디에 더 가까운지 계산
-    dist_to_top_sideline = C.PITCH_Y_MAX - merged_df['ball_y']
-    dist_to_bottom_sideline = merged_df['ball_y'] - C.PITCH_Y_MIN
-    
-    # 두 거리 중 더 작은 값을 선택
-    ball_sideline = np.minimum(dist_to_top_sideline, dist_to_bottom_sideline)
-    
-    return pd.DataFrame({
-        'action_id': merged_df['action_id'], # action_id 포함
-        'time_seconds': merged_df['time_seconds'], # time_seconds 포함
-        'distance_ball_goal': distance
-    }, index=merged_df.index)
-
 
 def distance_ball_sideline(merged_df):
     """
@@ -172,7 +149,7 @@ def elapsed_time(merged_df):
     return pd.DataFrame({
         'action_id': merged_df['action_id'],
         'time_seconds': merged_df['time_seconds'],
-        'elapsed_time': elapsed_time
+        'elapsed_time': result
     }, index=merged_df.index)
 
 def time_since_last_opponent_action(merged_df):
@@ -255,9 +232,9 @@ def def_goal(merged_df: pd.DataFrame) -> pd.DataFrame:
     }, index=merged_df.index)
 
 
-def goaldiff(merged_df, events_df) -> pd.DataFrame:
+def goal_diff(merged_df) -> pd.DataFrame:
 
-    goal_results = cumul_goal(merged_df, full_events_df)   
+    goal_results = cumul_goal(merged_df)   
     goal_diff_series = goal_results['att_goal_count'] - goal_results['def_goal_count']
     
     return pd.DataFrame({
@@ -342,7 +319,7 @@ def speed_diff_actor_defender(merged_df):
     actor_speeds_series = actor_speed(merged_df)['actor_speed']
 
     # 속도 차이 계산, closest_defender_speed는 results_df에 있음.
-    speed_diff = actor_speeds_series - results_df['closest_defender_speed']
+    speed_diff = abs(actor_speeds_series - results_df['closest_defender_speed'])
     
     return pd.DataFrame({
         'action_id': merged_df['action_id'],
@@ -416,7 +393,24 @@ def dist_defender_to_goaline(merged_df):
         'dist_defender_to_goaline': goaline_dist
     }, index=merged_df.index)
 
-# --- 6. (공에 가장 가까운 수비수와 사이드라인 사이의 거리, 공과 사이드라인 사이의 거리), 두 거리의 차이 ---
+# --- 6. (공에 가장 가까운 수비수와 골라인 사이의 거리, 공과 골라인 사이의 거리), 두 거리의 차이 ---
+def diff_ball_defender_goalline(merged_df):
+    results_df = get_closest_defender_info(merged_df)
+    def_goal_x = np.where(merged_df['team'] == 'Home', C.PITCH_X_MAX, C.PITCH_X_MIN)
+    defender_to_goaline = np.abs(def_goal_x - results_df['closest_defender_x'])
+
+    ball_x = merged_df['ball_x']
+    ball_to_goaline = abs(def_goal_x - ball_x)
+
+    diff =  abs(ball_to_goaline - defender_to_goaline)
+
+    return pd.DataFrame({        
+        'action_id': merged_df['action_id'],
+        'time_seconds': merged_df['time_seconds'],
+        'diff_ball_defender_goalline': diff
+    }, index=merged_df.index)
+
+# --- 7. (공에 가장 가까운 수비수와 사이드라인 사이의 거리, 공과 사이드라인 사이의 거리), 두 거리의 차이 ---
 def diff_ball_defender_sideline(merged_df):
     results_df = get_closest_defender_info(merged_df)
     
@@ -426,7 +420,7 @@ def diff_ball_defender_sideline(merged_df):
     ball_to_sideline = np.minimum(ball_y - C.PITCH_Y_MIN, C.PITCH_Y_MAX - ball_y)
     defender_to_sideline = np.minimum(defender_y - C.PITCH_Y_MIN, C.PITCH_Y_MAX - defender_y)
     
-    diff = ball_to_sideline - defender_to_sideline
+    diff = abs(ball_to_sideline - defender_to_sideline)
     return pd.DataFrame({        
         'action_id': merged_df['action_id'],
         'time_seconds': merged_df['time_seconds'],
@@ -493,7 +487,7 @@ def single_event_pitch_control(event_id, event_df_dict, params, radius_m):
         return {"event_id": event_id, "sum_pitch_control": summed}
     except Exception as e:
         print(f"[event_id {event_id}] pitch control 계산 실패: {e}")
-        return {"event_id": event_id, "summed_pitch_control": 0.0}
+        return {"event_id": event_id, "sum_pitch_control": 0.0}
 
 
 def sum_pitch_control(merged_df, teams_df, radius_m=4.0):
