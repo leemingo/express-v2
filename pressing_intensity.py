@@ -258,6 +258,7 @@ def load_bepro(data_path):
     total_dict = {match_id : {} for match_id in match_id_lst}
 
     for match_id in match_id_lst:
+        if match_id not in ["126424", "126433", "126444", "126458", "126466", "126473", "153373", "153385", "153387"]: continue
         if os.path.exists(os.path.join(data_path, match_id, f"{match_id}_processed_dict.pkl")):
             with open(os.path.join(data_path, match_id, f"{match_id}_processed_dict.pkl"), "rb") as f:
                 total_dict[match_id] = pickle.load(f)

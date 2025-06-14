@@ -13,7 +13,7 @@ from torch_geometric.data import Data, Batch
 from torch_geometric.nn import GATConv, GCNConv, global_mean_pool
 from torch_geometric.utils import dense_to_sparse
 
-from torchmetrics.classification import BinaryAccuracy, BinaryAUROC
+from torchmetrics.classification import BinaryAccuracy, BinaryAUROC, BinaryF1Score
 torch.autograd.set_detect_anomaly(True)
 
 # --- Constants and Configuration ---
@@ -637,39 +637,21 @@ class STLSTMGNN(nn.Module):
         self.classifier = nn.Linear(self.lstm_hidden_dim * self.num_directions, 1)
 
     def forward(self, batch: Dict) -> torch.Tensor:
-        batch['features'] = batch['features']
-        B, T, A, F_in = batch['features'].shape
-        device = batch['features'].device
-        x_frames = batch['features'].reshape(B*T, A, F_in) # [B, A, T, F_in]
-        # node_repr = batch['features'].reshape(B * T, A, F_in)
-        agent_order_lst = batch['agent_order']
-        pressed_id_lst = batch['pressed_id']
+        features, seq_lengths = batch['features'], batch['seq_lengths']
+        B, T_max, A, F_in = batch['features'].shape
+        device = features.device
+        mask = torch.arange(T_max, device=device).expand(B, T_max) < seq_lengths.unsqueeze(1)
+        valid_frames = features[mask]  # Shape: [num_valid_frames, A, F_in]
+        num_valid_frames = valid_frames.shape[0]
+        
+        # x_frames = batch['features'].reshape(B*T, A, F_in) # [B, A, T, F_in]
         
         data_list = []
-        for i in range(B*T):
-            feats = x_frames[i]  # [A, temporal_hidden_dim]
-            if self.use_pressing_features:
-                agent_order = agent_order_lst[i]
-                pressed_id = pressed_id_lst[i] 
-                pressed_idx = agent_order.index(pressed_id)    
-                avg_press = batch['pressing_intensity'].mean(dim=1) # [B, 11, 11]
-
-                P, O = avg_press.size(1), avg_press.size(2) # P: number of players, O: number of opponents
-                W = torch.zeros((A, A), device=device)
-                # presser nodes: first P, opponent nodes: next O
-                W[:P, P:P+O] = avg_press[i]
-                W[P:P+O, :P] = avg_press[i].t()
-
-                # Ball
-                ball_idx = 22 # Index of ball is always 22
-                W[:, ball_idx] = W[:, pressed_idx]
-                W[ball_idx, :] = W[pressed_idx, :]
-
-                edge_index, _ = dense_to_sparse(adj)
-                press_attr = W[edge_index[0], edge_index[1]]
-            else:
-                adj = torch.ones((A, A), device=device) - torch.eye(A, device=device)
-                edge_index, edge_weight = dense_to_sparse(adj)
+        for i in range(num_valid_frames):
+            feats = valid_frames[i]  # [A, temporal_hidden_dim]
+            # feats = x_frames[i]  # [A, temporal_hidden_dim]
+            adj = torch.ones((A, A), device=device) - torch.eye(A, device=device)
+            edge_index, edge_weight = dense_to_sparse(adj)
 
             # 2. 결정된 edge_index를 기반으로 엣지 특징을 계산합니다.
             source_nodes, dest_nodes = edge_index[0], edge_index[1]
@@ -690,11 +672,8 @@ class STLSTMGNN(nn.Module):
             is_same = (source_is_home & dest_is_home) | (source_is_away & dest_is_away)
             edge_same_team = is_same.float().unsqueeze(1)
 
-            if self.use_pressing_features:
-                edge_attr = torch.cat([edge_distances, edge_same_team, press_attr.unsqueeze(1)], dim=-1)
-            else:
-                # 거리, 팀여부 2가지 특징 결합
-                edge_attr = torch.cat([edge_distances, edge_same_team], dim=-1)
+            # 거리, 팀여부 2가지 특징 결합
+            edge_attr = torch.cat([edge_distances, edge_same_team], dim=-1)
 
             data_list.append(Data(x=feats, edge_index=edge_index, edge_attr=edge_attr))    
 
@@ -709,8 +688,9 @@ class STLSTMGNN(nn.Module):
         pooled = global_mean_pool(x, batch_graph.batch)     # [B, gnn_hidden_dim]
         
         # Temporal encoder
-        lstm_input = pooled.view(B, T, self.gnn_hidden_dim)
-        seq_lengths = batch['seq_lengths']
+        lstm_input = torch.zeros(B, T_max, self.gnn_hidden_dim, device=device)
+        lstm_input[mask] = pooled
+        # lstm_input = pooled.view(B, T_max, self.gnn_hidden_dim)
         packed_input = pack_padded_sequence(
             lstm_input, 
             seq_lengths.cpu(), # 길이는 CPU 텐서여야 합니다.
@@ -738,11 +718,13 @@ class exPressModel(pl.LightningModule):
         self.save_hyperparameters()
 
         # Instantiate the new GNN+LSTM model
-        # self.model = STLSTMGNN(model_config=model_config)
-        self.model = PressGNN(model_config=model_config)
+        # self.model = STLSTMGNN(model_config=model_config) # Multi frame
+        self.model = PressGNN(model_config=model_config) # Only one frame
         
         # self.criterion = nn.BCELoss()
         # self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([8.0]))
+        # pos_weight_tensor = torch.tensor([4.0]) 
+        # self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
         self.criterion = nn.BCEWithLogitsLoss()
 
         self.optimizer_params = optimizer_params
@@ -753,6 +735,8 @@ class exPressModel(pl.LightningModule):
         self.train_auroc = BinaryAUROC()
         self.val_auroc = BinaryAUROC()
         self.test_auroc = BinaryAUROC()
+        self.test_f1_score = BinaryF1Score(threshold=0.25)
+        
 
 
     def forward(self, batch: dict) -> torch.Tensor:
@@ -796,6 +780,9 @@ class exPressModel(pl.LightningModule):
         self.test_accuracy.update(preds, targets_int); self.log("test_acc", self.test_accuracy, on_step=False, on_epoch=True, logger=True)
         try: self.test_auroc.update(preds, targets_int); self.log("test_auroc", self.test_auroc, on_step=False, on_epoch=True, logger=True)
         except ValueError: pass
+        self.test_f1_score.update(preds, targets_int); self.log("test_f1", self.test_f1_score, on_step=False, on_epoch=True, logger=True)
+        brier_score = torch.mean((preds - targets.float())**2)
+        self.log("test_brier", brier_score, on_step=False, on_epoch=True, logger=True)
         # return {"test_loss": loss}
         return loss
 

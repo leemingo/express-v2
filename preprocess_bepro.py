@@ -220,7 +220,8 @@ def resample_tracking_dataframe(tracking_df, target_hz):
     for period_id in tracking_df['period_id'].unique():
         period_df = tracking_df[tracking_df['period_id'] == period_id]
 
-        min_timestamp = period_df['timestamp'].min()
+        # min_timestamp = period_df['timestamp'].min()
+        min_timestamp = pd.Timedelta(0)
         max_timestamp = period_df['timestamp'].max()
         global_original_index = pd.to_timedelta(sorted(period_df['timestamp'].unique()))
         global_target_index = pd.timedelta_range(start=min_timestamp, end=max_timestamp, freq=resample_freq_str)
@@ -241,12 +242,12 @@ def resample_tracking_dataframe(tracking_df, target_hz):
             reindexed_group[interpolation_cols] = reindexed_group[interpolation_cols].interpolate(method='pchip', limit_area='inside')
             
             # 5. 최종 결과 필터링: 보간된 결과에서 25Hz 시간대의 데이터만 선택
+            ffill_cols = [col for col in group_df.columns if col not in interpolation_cols and col != 'id']
+            reindexed_group[ffill_cols] = reindexed_group[ffill_cols].ffill()
             final_group = reindexed_group.reindex(global_target_index)
 
             # 6. 범주형 데이터 채우기
             final_group['id'] = agent_id
-            ffill_cols = [col for col in group_df.columns if col not in interpolation_cols and col != 'id']
-            final_group[ffill_cols] = final_group[ffill_cols].ffill()
             final_group = final_group.dropna(subset=['x', 'y'])
             resampled_list.append(final_group)
 
@@ -407,6 +408,7 @@ if __name__ == "__main__":
     total_dict = {match_id : {} for match_id in match_id_lst}
 
     for match_id in match_id_lst:
+        if match_id not in ["126424", "126433", "126444", "126458", "126466", "126473", "153373", "153385", "153387"]: continue
         print(f"Preprocessing Match ID {match_id}: Converting data into kloppy format...")
         match_dict = {}
         # if not os.path.exists(os.path.join(os.path.dirname(data_path), "processed", f"{match_id}_processed_dict.pkl")):

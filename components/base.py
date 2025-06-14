@@ -132,7 +132,7 @@ class BaseComponent(ABC):
         """Initializes the PyTorch Lightning Trainer."""
         print("Setting up Trainer...")
         # Callbacks
-        ckpt_path = os.path.join(self.args.root_path, "checkpoints")
+        ckpt_path = os.path.join(self.args.root_path, f"checkpoints_{self.args.exp_name}")
         os.makedirs(ckpt_path, exist_ok=True)
         monitor_metric = self.checkpoint_cfg.get('monitor','val_loss')
         ckpt_filename = f"{self.args.model_type}-" + "{epoch:02d}-{val_loss:.2f}"

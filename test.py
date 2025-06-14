@@ -7,8 +7,8 @@ import argparse # To accept checkpoint path as argument
 
 # Import project modules
 # import config  # Import static configurations
-from model import PytorchSoccerMapModel # Import Lightning model
-from datasets import PressingSequenceDataset, SoccerMapInputDataset 
+from model import PytorchSoccerMapModel, exPressModel # Import Lightning model
+from datasets import PressingSequenceDataset, exPressInputDataset, SoccerMapInputDataset 
 
 def test(ckpt_path: str):
     """Loads a checkpoint and runs testing on the test dataset."""
@@ -35,8 +35,8 @@ def test(ckpt_path: str):
     # if not os.path.exists(test_pickle_path):
     #     print(f"Error: Test data file not found at {test_pickle_path}")
     #     return
-    DATA_PATH = "/data/MHL/pressing-intensity" # Path where pickled datasets are saved
-    test_dataset = SoccerMapInputDataset(os.path.join(DATA_PATH, "test_dataset.pkl"))
+    DATA_PATH = "/data/MHL/pressing-intensity-feat" # Path where pickled datasets are saved
+    test_dataset = exPressInputDataset(os.path.join(DATA_PATH, "test_dataset.pkl"))
     
     if len(test_dataset) == 0:
         print("Loaded test dataset is empty. Exiting.")
@@ -70,10 +70,18 @@ def test(ckpt_path: str):
         }
     }
     model_config = {
-        "in_channels": 125 * 13
+        "in_channels": 10,
+            "num_gnn_layers": 2,
+            "gnn_hidden_dim": 64,
+            "num_lstm_layers": 2,
+            "lstm_hidden_dim": 64,
+            "lstm_dropout": 0.4,
+            "lstm_bidirectional": True,
+            "use_pressing_features": False,
+            "gnn_head": 4
     }
 
-    model = PytorchSoccerMapModel(model_config=model_config, optimizer_params=optimizer_params)
+    model = exPressModel(model_config=model_config, optimizer_params=optimizer_params)
     model = model.to("cuda")
 
 

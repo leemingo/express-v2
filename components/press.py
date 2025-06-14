@@ -105,7 +105,6 @@ class exPressComponent(BaseComponent):
     def _setup_data(self, stage='fit'):
         """Sets up datasets and dataloaders for fit (train/val) or test stage."""
         print(f"Setting up data for stage: {stage}")
-        val_split_ratio = self.data_cfg.get('val_split_ratio', 0.2)
         num_workers = self.data_cfg.get("num_workers", 0)
         batch_size = self.data_cfg.get("batch_size", 32)
         pin_memory = self.data_cfg.get("pin_memory", True)
@@ -115,8 +114,9 @@ class exPressComponent(BaseComponent):
             "num_workers": num_workers,
             "pin_memory": pin_memory,
             "persistent_workers": True if num_workers > 0 else False,
-            "collate_fn": custom_temporal_collate
+            # "collate_fn": custom_temporal_collate
         }
+
         train_pkl_path = f"{self.args.root_path}/train_dataset.pkl"
         train_dataset = exPressInputDataset(train_pkl_path)
         if len(train_dataset) == 0: print("Loaded training dataset is empty."); exit()

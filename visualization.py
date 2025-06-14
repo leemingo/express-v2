@@ -24,8 +24,8 @@ def plot_single_frame_positions(total_df, period_id, frame_idx, home_team_info, 
     # team_colors = {"Home": "blue", "Away": "red", "Ball": "black"}
     # team_colors = {"Home": "red", "Away": "black", "Ball": "orange"}
     styles = {
-        "Home": {"facecolor": "red",    "edgecolor": "black"},
-        "Away": {"facecolor": "orange", "edgecolor": "red"},
+        "Home": {"facecolor": "red",    "edgecolor": "red"},
+        "Away": {"facecolor": "orange", "edgecolor": "orange"},
         "Ball": {"facecolor": "blue", "edgecolor": "black"}
     }
 
@@ -54,12 +54,13 @@ def plot_single_frame_positions(total_df, period_id, frame_idx, home_team_info, 
     )
 
     fig, ax = pitch.draw()
-    ax.set_title(f"Frame {frame_idx} Player Positions", fontsize=14)
+    # ax.set_title(f"Frame {frame_idx} Player Positions", fontsize=14)
     nodes = []
     # Plot each player's position and jersey number
     for pid in player_ids:
         x = df[df['id']==pid]["x"].iloc[0]
         y = df[df['id']==pid]["y"].iloc[0]
+        position = df[df['id']==pid]["position_name"].iloc[0]
         if pd.isna(x) or pd.isna(y):
             continue  
         
@@ -79,9 +80,16 @@ def plot_single_frame_positions(total_df, period_id, frame_idx, home_team_info, 
             # color = "gray"
             # jersey_no = ""
             cat = None; jersey = ""
-         
+
         style = styles.get(cat, {"facecolor":"gray","edgecolor":"black"})
-        #
+        if position == 'GK':
+            if cat == 'Home':
+                style = dict({"facecolor": "grey",    "edgecolor": "grey"})
+            
+            else:
+                style = dict({"facecolor": "green",    "edgecolor": "green"})
+
+        
         #  Scatter plot for player position
         # ax.scatter(x, y, color=color, s=100, alpha=0.8)
         ax.scatter(x, y, facecolor=style["facecolor"],
@@ -92,13 +100,16 @@ def plot_single_frame_positions(total_df, period_id, frame_idx, home_team_info, 
             #         ha="center", va="center")
         if jersey:
             ax.text(x, y, str(jersey), fontsize=7, fontweight="bold", color="white",
-                    ha="center", va="center")
+                    ha="center", va="center",
+                    rotation=270,
+                    rotation_mode='anchor'
+                    )
         nodes.append((x, y))
-    for (x1, y1), (x2, y2) in itertools.combinations(nodes, 2):
-        ax.plot(
-            [x1, x2], [y1, y2],
-            color='gray', linewidth=0.5, alpha=0.6, zorder=1
-        )    
+    # for (x1, y1), (x2, y2) in itertools.combinations(nodes, 2):
+    #     ax.plot(
+    #         [x1, x2], [y1, y2],
+    #         color='gray', linewidth=0.5, alpha=0.6, zorder=1
+    #     )    
 
     # Create legend: Home team, Away team, Ball (if necessary)
     # home_patch = mpatches.Patch(color=team_colors["Home"], label='Home')
@@ -189,7 +200,7 @@ def plot_window_frame_positions(total_df, period_id, start_frame_idx, end_frame_
          # Scatter plot for the final position
         ax.scatter(current_x, current_y, color=color, s=100, alpha=0.8)
         if jersey_no != "":
-            ax.text(current_x, current_y, str(jersey_no), fontsize=7, fontweight="bold", color="white",
+            ax.text(current_x, current_y, str(jersey_no), fontsize=7, fontweight="bold", color="black",
                     ha="center", va="center")
     
          # Add velocity arrow

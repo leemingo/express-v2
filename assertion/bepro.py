@@ -39,7 +39,7 @@ def convert_to_actions(events: pd.DataFrame) -> DataFrame[LSDPSchema]:
     # 분석에 활용하지 않은 이벤트 제거: 결측치 & 중복값
     events = _clean_events(events, remove_event_types=["HIR", "MAX_SPEED", "VHIR", "Assists", "Key Passes", "SPRINT", "Set Piece Defence"])
 
-    # preprocess location
+    # preprocess location: 이전에 일단 처리한 상태라서 주석 처리함
     events = _convert_locations(events)   
 
     # reactor: 이벤트에 반응하는 선수. Goal Conceded, Own Goal, Foul, Duel
@@ -132,6 +132,7 @@ def _convert_locations(events: pd.DataFrame) -> None:
         (is_home & (events['attack_direction'] == 'LEFT')) | # Home팀이 왼쪽으로 공격하고 있으면 flip
         (~is_home & (events['attack_direction'] == 'RIGHT')) # Home팀이 오른쪽으로 공격하고 있으면 flip
     )
+
     events.loc[flip_xy, ['x', 'to_x']] = 1 - events.loc[flip_xy, ['x', 'to_x']].values
     events.loc[flip_xy, ['y', 'to_y']] = 1 - events.loc[flip_xy, ['y', 'to_y']].values
 

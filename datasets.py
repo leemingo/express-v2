@@ -5,6 +5,7 @@ import numpy as np
 import os
 import pandas as pd
 import pickle
+import random
 from tqdm import tqdm
 import torch
 from torch.utils.data import Dataset
@@ -314,7 +315,6 @@ class PressingSequenceDataset(Dataset):
         if os.path.exists(self.data_path):  
             total_dict = {match_id : {} for match_id in self.match_id_lst}
             for match_id in self.match_id_lst:
-                
                 print(f"Load match_id : {match_id}")
                 total_dict[match_id] = {}
                 with open(f"{data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
@@ -333,18 +333,16 @@ class PressingSequenceDataset(Dataset):
                 with open(f"{data_path}/{match_id}/{match_id}_presing_intensity.pkl", "rb") as f:
                     pressing_df = pickle.load(f)
 
-                event_df = pd.read_csv(f"{data_path}/{match_id}/valid_events_filtered.csv")                
+                event_df = pd.read_csv(f"{data_path}/{match_id}/valid_events_filtered2.csv")                
                 # Preprocessing event data.
                 event_df = self._preprocess_event_df(event_df, teams_df)
             
                 total_df = self._merge_tracking_pressing_df(tracking_df, pressing_df, teams_df)
-
                 total_dict[match_id]['tracking_df'] = total_df
                 total_dict[match_id]['event_df'] = event_df
                 total_dict[match_id]['meta_data'] = meta_data
                 total_dict[match_id]['Home'] = match_dict['teams']['Home']
                 total_dict[match_id]['Away'] = match_dict['teams']['Away']
-
                 # ball carrier에 대해 pressing intensity가 0.9보다 큰 경우 pressed_df 구성
                 pressed_dict = {}
                 ball_carrier_df = total_df[total_df['is_ball_carrier'] == True].copy()
@@ -411,14 +409,42 @@ class PressingSequenceDataset(Dataset):
                         label = int(row['ball_ownership_changed'])
                         pressed_player = row['id']
                         pressing_player = row['pressing_player']
-                        window_event_df = event_df[
-                            (event_df['period_id'] == period_id) &
-                            (event_df['time_seconds'] >= timestamp - pd.Timedelta(seconds=5)) &
-                            (event_df['time_seconds'] <= timestamp)
+                        # window_event_df = event_df[
+                        #     (event_df['period_id'] == period_id) &
+                        #     (event_df['time_seconds'] >= timestamp - pd.Timedelta(seconds=5)) &
+                        #     (event_df['time_seconds'] <= timestamp)
+                        # ]
+                        # timestamps_list = window_event_df['time_seconds'].unique().tolist() + [timestamp]
+                        # X_slice = total_df[(total_df['period_id'] == period_id) & (total_df['timestamp'].isin(timestamps_list))].copy()
+
+                        window_df = total_df[
+                            (total_df['period_id'] == period_id) &
+                            (total_df['timestamp'] >= timestamp - pd.Timedelta(seconds=5)) &
+                            (total_df['timestamp'] <= timestamp)
                         ]
                         
-                        timestamps_list = window_event_df['time_seconds'].unique().tolist() + [timestamp]
-                        X_slice = total_df[(total_df['period_id'] == period_id) & (total_df['timestamp'].isin(timestamps_list))].copy()
+                        counts_per_timestamp = window_df.groupby('timestamp').size()
+                        pressing_frame_count = counts_per_timestamp.get(timestamp)
+                        valid_counts = counts_per_timestamp[counts_per_timestamp == pressing_frame_count]
+                        available_timestamps = valid_counts.index.tolist()
+
+                        num_frames_to_sample = 5   
+
+                        # 항상 가장 마지막 프레임(압박 발생 시점)은 포함해야 하므로, 샘플링 풀에서 잠시 제외
+                        if timestamp in available_timestamps:
+                            available_timestamps.remove(timestamp)
+
+                        # (전체-1)개 중에서 (25-1)개를 샘플링
+                        if len(available_timestamps) >= (num_frames_to_sample - 1):
+                            sampled_timestamps = random.sample(available_timestamps, num_frames_to_sample - 1)
+                        else:
+                            # 24개보다 적으면 있는 그대로 모두 사용
+                            print(f"Warning : {match_id}-{period_id}-{frame_id} doesn't have {num_frames_to_sample} windows.")
+                            sampled_timestamps = available_timestamps
+
+                        final_timestamps = sampled_timestamps + [timestamp]
+                        final_timestamps.sort()
+                        X_slice = total_df[(total_df['period_id'] == period_id) & (total_df['timestamp'].isin(final_timestamps))].copy()
                         
                         # Always press left -> right
                         # If pressed players' team is home, flip
@@ -447,7 +473,6 @@ class PressingSequenceDataset(Dataset):
                         agents_order = agents_rows + agents_cols
                         
                         # Ensure the player IDs are consistent and match num_agents (22 players + 1 ball)
-                        num_unique_agents = X_slice['id'].nunique()
                         all_known_agents = set(X_slice['id'].unique())
                         missing_agent_ids = [agent for agent in agents_order if agent not in all_known_agents and 'Missing' in agent]
 
@@ -797,6 +822,17 @@ class exPressInputDataset(Dataset):
          # Prevent division by zero for constant features
         self.feature_ranges[self.feature_ranges == 0] = 1.0 
 
+        # scaler_path = os.path.join(os.path.dirname(pickled_dataset_path), "scaler.pkl")
+        # with open(scaler_path, "rb") as f:
+        #     scaler = pickle.load(f)
+        #     self.feature_mean = scaler['mean']
+        #     self.feature_std = scaler['std']
+        #     self.continuous_indices = scaler['continuous_indices']
+
+        # self.mean_vals = self.feature_mean.reshape(1, 1, -1)
+        # self.std_vals = self.feature_std.reshape(1, 1, -1)
+
+
     def __len__(self):
         """Returns the total number of samples."""
         return len(self.loaded_data)
@@ -809,10 +845,22 @@ class exPressInputDataset(Dataset):
         if self.loaded_data is None or idx >= len(self.loaded_data):
             raise IndexError("Index out of bounds or data not loaded")
         features = self.loaded_data[idx]['features']
-        # Normalize
+        # Min-Max Normalization
         features = (features - self.min_vals) / self.feature_ranges
-
-        pressing_intensity = self.loaded_data[idx]['pressing_intensity']
+        
+        # used_feature_ids = [i for i in range(18) if i not in [2, 3, 4, 5, 6, 7, 16, 17]] # For feature selection
+        # features = features[...,  used_feature_ids]  # For feature selection
+        features = features[-1:, ...] # Using one frame
+        # pressing_intensity = self.loaded_data[idx]['pressing_intensity']
+        pressing_intensity = self.loaded_data[idx]['pressing_intensity'][-1:, ...] # Using one frame
+        
+        if features.shape[0] >= 5:
+            indices = torch.arange(0,features.shape[0], 5)
+            indices = torch.arange(0,features.shape[0], 5)
+            last_index = torch.tensor([features.shape[0] - 1])
+            final_indices = torch.unique(torch.cat([indices, last_index]))
+            features = features[final_indices, ...] # Using one frame
+        
         label = self.loaded_data[idx]['label']
         pressed_id = self.loaded_data[idx]['pressed_id']
         presser_id = self.loaded_data[idx]['presser_id']
@@ -832,9 +880,10 @@ class exPressInputDataset(Dataset):
 
 if __name__ == "__main__":
     data_path = "/data/MHL/bepro/processed"
-    save_path = "/data/MHL/pressing-intensity-feat"
+    save_path = "/data/MHL/pressing-intensity-0.9"
     os.makedirs(save_path, exist_ok=True)
     match_id_lst = os.listdir(data_path)
+    match_id_lst.sort()
     match_id_lst = [match_id for match_id in match_id_lst if match_id not in ["126319", "153381", "153390", "126285"]]
     train_match_id_lst = match_id_lst[:-6]
     valid_match_id_lst = match_id_lst[-6:-3]
@@ -848,5 +897,6 @@ if __name__ == "__main__":
         pickle.dump(valid_dataset, f)
     with open(f"{save_path}/test_dataset.pkl", "wb") as f:
         pickle.dump(test_dataset, f)
+
     print("Done")
     
