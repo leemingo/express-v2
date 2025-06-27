@@ -113,7 +113,7 @@
             }
         },
         "ModelConfig": {
-            "in_channels": 10,
+            "in_channels": 19,
             "num_gnn_layers": 2,
             "gnn_hidden_dim": 64,
             "num_lstm_layers": 2,

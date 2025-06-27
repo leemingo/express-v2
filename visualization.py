@@ -24,10 +24,11 @@ def plot_single_frame_positions(total_df, period_id, frame_idx, home_team_info, 
     # team_colors = {"Home": "blue", "Away": "red", "Ball": "black"}
     # team_colors = {"Home": "red", "Away": "black", "Ball": "orange"}
     styles = {
-        "Home": {"facecolor": "red",    "edgecolor": "red"},
-        "Away": {"facecolor": "orange", "edgecolor": "orange"},
-        "Ball": {"facecolor": "blue", "edgecolor": "black"}
+        "Home": {"facecolor": "tab:blue",    "edgecolor": "tab:blue"},
+        "Away": {"facecolor": "tab:red", "edgecolor": "tab:red"},
+        "Ball": {"facecolor": "tab:black", "edgecolor": "tab:black"}
     }
+    
 
     df = total_df[(total_df['period_id']==period_id) & (total_df['frame_id']==frame_idx)].copy()
     # Detect player IDs in the frame
@@ -200,7 +201,7 @@ def plot_window_frame_positions(total_df, period_id, start_frame_idx, end_frame_
          # Scatter plot for the final position
         ax.scatter(current_x, current_y, color=color, s=100, alpha=0.8)
         if jersey_no != "":
-            ax.text(current_x, current_y, str(jersey_no), fontsize=7, fontweight="bold", color="black",
+            ax.text(current_x, current_y, str(jersey_no), fontsize=7, fontweight="bold", color="white",
                     ha="center", va="center")
     
          # Add velocity arrow
@@ -213,13 +214,13 @@ def plot_window_frame_positions(total_df, period_id, start_frame_idx, end_frame_
     
     # Create legend: Home team, Away team, Ball (if necessary)           
     home_patch = mpatches.Patch(color=team_colors["Home"], label='Home')
-    away_patch = mpatches.Patch(color=team_colors["Away"], label='Away')
+    away_patch = mpatches.Patch(color=team_colors["Away"], label='Away') 
     ball_patch = mpatches.Patch(color=team_colors["Ball"], label="Ball")
     ax.legend(handles=[home_patch, away_patch, ball_patch], loc='upper right')
     
     plt.show()
 
-def create_match_animation(total_df, period_id, start_frame_idx, end_frame_idx, pitch, home_team_info, away_team_info, sampling_rate=25, filename='match_animation.mp4'):
+def create_match_animation(total_df, period_id, start_frame_idx, end_frame_idx, home_team_info, away_team_info, sampling_rate=25, filename='match_animation.mp4'):
     """
     Creates and saves an animation of player movements and velocities for a time window.
 
@@ -236,6 +237,18 @@ def create_match_animation(total_df, period_id, start_frame_idx, end_frame_idx, 
         filename (str): Name of the file to save the animation (e.g., 'animation.mp4', 'animation.gif').
                         Requires appropriate writers like ffmpeg or imagemagick.
     """
+    # Draw the pitch
+    pitch_length = C.PITCH_X_MAX - C.PITCH_X_MIN
+    pitch_width = C.PITCH_Y_MAX - C.PITCH_Y_MIN
+    
+    pitch = Pitch(
+        pitch_type='secondspectrum', 
+        pitch_length=pitch_length,
+        pitch_width=pitch_width,
+        pitch_color='white', 
+        line_color='gray'
+    )
+
     # --- 0. Basic Settings and Data Preparation ---
     team_colors = {"Home": "blue", "Away": "red", "Ball": "black", "Unknown": "gray"}
     dt = 1.0 / sampling_rate

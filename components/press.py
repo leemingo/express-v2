@@ -35,7 +35,7 @@ class SoccerMapComponent(BaseComponent):
             "num_workers": num_workers,
             "pin_memory": pin_memory,
             "persistent_workers": True if num_workers > 0 else False,
-            # "collate_fn": collate_fn_skip_none
+            "collate_fn": collate_fn_skip_none
         }
         
         if stage == 'fit':
@@ -114,7 +114,7 @@ class exPressComponent(BaseComponent):
             "num_workers": num_workers,
             "pin_memory": pin_memory,
             "persistent_workers": True if num_workers > 0 else False,
-            # "collate_fn": custom_temporal_collate
+            "collate_fn": custom_temporal_collate
         }
 
         train_pkl_path = f"{self.args.root_path}/train_dataset.pkl"

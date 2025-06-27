@@ -35,7 +35,7 @@ def test(ckpt_path: str):
     # if not os.path.exists(test_pickle_path):
     #     print(f"Error: Test data file not found at {test_pickle_path}")
     #     return
-    DATA_PATH = "/data/MHL/pressing-intensity-feat" # Path where pickled datasets are saved
+    DATA_PATH = "/data/MHL/pressing-intensity-0.9" # Path where pickled datasets are saved
     test_dataset = exPressInputDataset(os.path.join(DATA_PATH, "test_dataset.pkl"))
     
     if len(test_dataset) == 0:
@@ -70,7 +70,7 @@ def test(ckpt_path: str):
         }
     }
     model_config = {
-        "in_channels": 10,
+        "in_channels": 18,
             "num_gnn_layers": 2,
             "gnn_hidden_dim": 64,
             "num_lstm_layers": 2,
