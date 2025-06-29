@@ -4,6 +4,7 @@ import os
 import numpy as np
 import pandas as pd
 import pickle
+import argparse
 from pathlib import Path
 from scipy.signal import savgol_filter
 from floodlight.io.dfl import read_position_data_xml, read_event_data_xml, read_teamsheets_from_mat_info_xml
@@ -1187,7 +1188,12 @@ def print_match_info(match_info_path):
 
 
 if __name__ == '__main__':
-    data_path = "/data/MHL/dfl-spoho/raw"
+    parser = argparse.ArgumentParser(description="Preprocess DFL raw tracking data.")
+    parser.add_argument("--data_path", type=str, required=True,
+                       help="Path to raw DFL data directory")
+    
+    args = parser.parse_args()
+    data_path = args.data_path
     load_all_data(data_path)
     print('Done')
 

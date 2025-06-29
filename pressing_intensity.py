@@ -6,6 +6,7 @@ import os
 import polars as pl
 import pickle
 import pandas as pd
+import argparse
 
 from dataclasses import dataclass
 from typing import Union, Any, Dict
@@ -258,7 +259,7 @@ def load_bepro(data_path):
     total_dict = {match_id : {} for match_id in match_id_lst}
 
     for match_id in match_id_lst:
-        if match_id not in ["126424", "126433", "126444", "126458", "126466", "126473", "153373", "153385", "153387"]: continue
+        # if match_id not in ["126424", "126433", "126444", "126458", "126466", "126473", "153373", "153385", "153387"]: continue
         if os.path.exists(os.path.join(data_path, match_id, f"{match_id}_processed_dict.pkl")):
             with open(os.path.join(data_path, match_id, f"{match_id}_processed_dict.pkl"), "rb") as f:
                 total_dict[match_id] = pickle.load(f)
@@ -305,12 +306,21 @@ def load_bepro(data_path):
 
 
 if __name__=="__main__":
-    source = 'bepro'
-    if source == 'dfl-spoho':
+    parser = argparse.ArgumentParser(description="Calculate pressing intensity for different data sources.")
+    parser.add_argument("--source", type=str, default="bepro", 
+                       choices=["bepro", "dfl-spoho", "dfl-confidential"],
+                       help="Data source to process (default: bepro)")
+    
+    args = parser.parse_args()
+    
+    if args.source == 'dfl-spoho':
         load_dfl_spoho("/data/MHL/dfl-spoho/processed")
-    elif source == 'dfl-confidential':
+    elif args.source == 'dfl-confidential':
         load_dfl_confidential("/data/MHL/dfl-confidential/processed")
-    elif source == 'bepro':
+    elif args.source == 'bepro':
         load_bepro("/data/MHL/bepro/processed")
+    else:
+        print(f"Unknown source: {args.source}")
+        print("Available sources: bepro, dfl-spoho, dfl-confidential")
     
     print("Done")

@@ -3,6 +3,7 @@ import numpy as np
 import os
 import pandas as pd
 import pickle
+import argparse
 from scipy.signal import savgol_filter
 from tqdm import tqdm
 
@@ -176,34 +177,63 @@ def _calculate_kinematics(df: pd.DataFrame, smoothing_params: dict, max_speed: f
         period_df['vy'] = period_df['y'].diff() / dt
         period_df['vz'] = period_df['z'].diff() / dt if is_ball else 0.0
 
-        # Smooth velocities (handle potential NaNs from diff)
+        # vx, vy로 speed 계산
+        period_df['v'] = np.sqrt(period_df['vx']**2 + period_df['vy']**2 + period_df['vz']**2)
+        # speed outlier 마스킹
+        is_speed_outlier = period_df['v'] > max_speed
+                
         vel_cols = ['vx', 'vy', 'vz'] if is_ball else ['vx', 'vy']
+        # vx, vy를 outlier 구간에서 NaN으로 만들고 interpolate
         for col in vel_cols:
+            # 1. 속도 outlier 구간에서 NaN으로 만들고 interpolate
+            period_df[col] = period_df[col].mask(is_speed_outlier)
+            period_df[col] = period_df[col].interpolate(limit_direction='both')
+
             data_to_smooth = period_df[col].fillna(0) # Fill NaNs before smoothing
-             # Ensure window length is odd and <= data length
+            # Ensure window length is odd and <= data length
             window_length = min(smoothing_params['window_length'], len(data_to_smooth))
             if window_length % 2 == 0: window_length -= 1 # Make odd
             if window_length >= smoothing_params['polyorder'] + 1 and window_length > 0: # Basic check
                 period_df[col] = savgol_filter(data_to_smooth,
-                                              window_length=window_length,
-                                              polyorder=smoothing_params['polyorder'])
+                                                window_length=window_length,
+                                                polyorder=smoothing_params['polyorder'])
             else: # Not enough data or invalid params, skip smoothing
-                period_df[col] = data_to_smooth
-
+                period_df[col] = data_to_smooth     
+        
+        # 보정된 vx, vy로 speed 재계산
+        period_df['v'] = np.sqrt(period_df['vx']**2 + period_df['vy']**2 + period_df['vz']**2)
+        
         # Calculate accelerations
         period_df['ax'] = period_df['vx'].diff() / dt
         period_df['ay'] = period_df['vy'].diff() / dt
         period_df['az'] = period_df['vz'].diff() / dt if is_ball else 0.0
 
-        # Fill NaN accelerations (occur at start and where dt was invalid)
-        accel_cols = ['ax', 'ay', 'az']
-        for col in accel_cols:
-            period_df[col] = period_df[col].fillna(0)
-
-        # Calculate Speed and Acceleration Magnitude & Apply Caps
-        period_df['v'] = np.sqrt(period_df['vx']**2 + period_df['vy']**2 + period_df['vz']**2)
+        # 가속도 크기(accel) 계산
         period_df['a'] = np.sqrt(period_df['ax']**2 + period_df['ay']**2 + period_df['az']**2)
+        
+        # accel outlier 마스킹
+        is_accel_outlier = period_df['a'] > max_acceleration
+        accel_cols = ['ax', 'ay', 'az'] if is_ball else ['ax', 'ay']
 
+        for col in accel_cols:
+            period_df[col] = period_df[col].mask(is_accel_outlier)
+            period_df[col] = period_df[col].interpolate(limit_direction='both')
+
+            data_to_smooth = period_df[col].fillna(0) # Fill NaNs before smoothing
+            # Ensure window length is odd and <= data length
+            window_length = min(smoothing_params['window_length'], len(data_to_smooth))
+            if window_length % 2 == 0: window_length -= 1 # Make odd
+            if window_length >= smoothing_params['polyorder'] + 1 and window_length > 0: # Basic check
+                period_df[col] = savgol_filter(data_to_smooth,
+                                                window_length=window_length,
+                                                polyorder=smoothing_params['polyorder'])
+            else: # Not enough data or invalid params, skip smoothing
+                period_df[col] = data_to_smooth     
+        
+        # 보정된 ax, ay, az로 accel 재계산
+        period_df['a'] = np.sqrt(period_df['ax']**2 + period_df['ay']**2 + period_df['az']**2)
+        
+        # Limit speed and acceleration
         period_df['v'] = np.minimum(period_df['v'], max_speed)
         period_df['a'] = np.minimum(period_df['a'], max_acceleration)
 
@@ -334,9 +364,6 @@ def create_tracking_dataframe(match_path, meta_data, teams_dict):
                             row_data['team_id'] = 'ball'
                             row_data['position_name'] = 'ball'
                         else:
-                            # row_data['id'] = str(row_data['player_id'])
-                            # teams_df['team_id'] = teams_df[teams_df['pID'] == row_data['id']]['position'].iloc[0]
-                            # teams_df['position_name'] = teams_df[teams_df['pID'] == row_data['id']]['tID'].iloc[0]
                             player_pID = str(object_data.get('player_id'))
                             row_data['id'] = player_pID
                             if player_pID in player_lookup.index:
@@ -345,15 +372,16 @@ def create_tracking_dataframe(match_path, meta_data, teams_dict):
                             else:
                                 row_data['team_id'] = None
                                 row_data['position_name'] = None
+                        # Delete unnecessary columns
                         row_data.pop('object')
                         row_data.pop('player_id')
                         all_object_rows.append(row_data)
 
     tracking_df = pd.DataFrame(all_object_rows)
     tracking_df['timestamp'] = pd.to_timedelta(tracking_df['timestamp'], unit='ms')
-    # Rescale
+    # Rescale pitch coordinates
     tracking_df = rescale_pitch(tracking_df, meta_data)
-    # Resample (30Hz -> 25Hz)
+    # Resample (30Hz -> 25Hz) to match the event data
     tracking_df = resample_tracking_dataframe(tracking_df, target_hz=25)
     
     # Calculate kinematics
@@ -401,14 +429,19 @@ def create_tracking_dataframe(match_path, meta_data, teams_dict):
     return total_tracking_df
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Preprocess BePro raw tracking data.")
+    parser.add_argument("--data_path", type=str, required=True,
+                       help="Path to raw BePro data directory")
+    args = parser.parse_args()
+    
     root_path = os.path.abspath("..")
-    data_path = "/data/MHL/bepro/raw"
+    data_path = args.data_path
 
     match_id_lst = os.listdir(data_path)
     total_dict = {match_id : {} for match_id in match_id_lst}
 
     for match_id in match_id_lst:
-        if match_id not in ["126424", "126433", "126444", "126458", "126466", "126473", "153373", "153385", "153387"]: continue
+        # if match_id not in ["126424", "126433", "126444", "126458", "126466", "126473", "153373", "153385", "153387"]: continue
         print(f"Preprocessing Match ID {match_id}: Converting data into kloppy format...")
         match_dict = {}
         # if not os.path.exists(os.path.join(os.path.dirname(data_path), "processed", f"{match_id}_processed_dict.pkl")):
