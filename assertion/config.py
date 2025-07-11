@@ -20,6 +20,10 @@ import pandas as pd  # type: ignore
 field_length = 105
 field_width = 68
 
+# Pitch dimensions for consistency with main project
+PITCH_X_MIN, PITCH_X_MAX = -52.5, 52.5
+PITCH_Y_MIN, PITCH_Y_MAX = -34.0, 34.0
+
 priority_map = {
     "Pass_Freekick": 0,
     "Shot_Freekick": 0,

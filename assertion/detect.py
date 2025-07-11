@@ -1,3 +1,9 @@
+"""Error detection script for BePro dataset validation.
+
+This script processes BePro soccer data to detect and analyze errors
+in event sequences using the assertion validation system.
+"""
+
 import os
 import sys
 import pandas as pd
@@ -6,7 +12,7 @@ from tqdm import tqdm
 from pathlib import Path
 from env import PROJECT_DIR
 error_path = Path(PROJECT_DIR / "assertion" / "error_data" / "bepro")
-error_path = Path(PROJECT_DIR / "assertion_statsbomb" / "error_data" / "statsbomb")
+# error_path = Path(PROJECT_DIR / "assertion_statsbomb" / "error_data" / "statsbomb")
 
 from datatools.data.bepro import BeproLoader
 import datatools.lsdp as lsdp

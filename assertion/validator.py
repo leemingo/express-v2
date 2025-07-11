@@ -13,13 +13,29 @@ cols = [
 ]
 # 대전제: State Machine은 현재의 Current State와 그 Attribute로 다음 State를 명확하게 예측 및 검증할 수 있다.
 class Validator:
+    """Event sequence validator using state machine approach.
+    
+    This class validates soccer event sequences using a state machine
+    defined by YAML transition rules. It processes events period by period
+    and applies various validation and correction mechanisms.
+    
+    Attributes:
+        df_events: DataFrame containing event data to validate.
+        df_errors: List of validation errors found during processing.
+        drop_idx: List of indices to drop due to errors.
+        window_size: Size of the context window for validation.
+        state_machine: State machine instance for transition validation.
+        error_handler: ErrorHandler instance for error correction.
+        condition: Condition instance for transition condition checking.
+        rules: Dictionary containing transition rules from YAML file.
+    """
+    
     def __init__(self, df_events, yaml_file):
-        """
-        이벤트 시퀀스를 DataFrame에서 처리하는 Validator 클래스.
-
-        매개변수:
-        - df: 이벤트 데이터 DataFrame.
-        - yaml_file: 상태 전이 규칙이 포함된 YAML 파일 경로.
+        """Initialize the Validator with event data and transition rules.
+        
+        Args:
+            df_events: DataFrame containing event data to validate.
+            yaml_file: Path to YAML file containing state transition rules.
         """
         self.df_events = df_events
         self.df_errors = []
@@ -36,7 +52,11 @@ class Validator:
             self.rules = yaml.safe_load(file)
 
     def _initialize_state_machine(self):
-        """YAML 규칙을 기반으로 상태 머신 초기화."""
+        """Initialize state machine based on YAML transition rules.
+        
+        This method creates a state machine instance using the transitions
+        library, with states and transitions defined in the loaded YAML file.
+        """
         states = self.rules["states"]
 
         transitions = [
@@ -59,9 +79,11 @@ class Validator:
         )
 
     def validate_sequence(self):
-        """
-        DataFrame의 이벤트 시퀀스를 검증.
-        상태 전이 시 Attributes를 윈도우에 추가하고 조건을 검증합니다.
+        """Validate event sequences in the DataFrame.
+        
+        This method processes event sequences period by period, applying
+        state machine validation and error correction mechanisms. It handles
+        window-based context analysis and applies various validation rules.
         """
         period_df = []
         for _, period_group in self.df_events.groupby('period_id'):

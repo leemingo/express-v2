@@ -1,4 +1,8 @@
-"""Schema for SPADL actions."""
+"""Schema for SPADL actions.
+
+This module defines the data schema for LSDP (Labelled Soccer Data Protocol) 
+dataframes using Pandera for type validation and constraint checking.
+"""
 
 from typing import Any, Optional
 

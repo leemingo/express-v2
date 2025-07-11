@@ -7,26 +7,29 @@ import pickle
 from tqdm import tqdm
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
 
+import argparse
 from pathlib import Path
-base_path = Path(__file__).resolve().parent.parent
-print(f"Base path: {base_path}")
-# data_path = Path(base_path, "data", "bepro", "processed")
-data_path = Path("/data/MHL/bepro/processed")
-yaml_file = Path(base_path, "assertion", "transitions.yaml")
+
 
 from bepro import convert_to_actions
 from validator import Validator
 import assertion.config as lsdpconfig
 
-PITCH_X_MIN, PITCH_X_MAX = -52.5, 52.5
-PITCH_Y_MIN, PITCH_Y_MAX = -34.0, 34.0
-
 from soccerparser.constants import Constants
 from soccerparser.kleague_parser import KLeagueParser
 
 def parse_kleague_data(data_path, match_id):
-    """
-    Parse K-League data and save it to the specified directory.
+    """Parse K-League data and save it to the specified directory.
+    
+    This function loads K-League match data, processes player information,
+    and performs data parsing using the KLeagueParser.
+    
+    Args:
+        data_path: Path to the directory containing match data.
+        match_id: Identifier for the specific match to process.
+        
+    Returns:
+        pd.DataFrame: Processed and merged event data with player information.
     """
     with open(f"{data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
         match_dict = pickle.load(f)
@@ -42,7 +45,7 @@ def parse_kleague_data(data_path, match_id):
     player_id_to_jersey_number = {int(row.pID): int(row.jID) for row in team_sheets.itertuples()}
 
     # parser = KLeagueParser(match_id, data_dir=f"{base_path}/data/bepro/processed")
-    parser = KLeagueParser(match_id, data_dir=f"/data/MHL/bepro/processed")
+    parser = KLeagueParser(match_id, data_dir=data_path)
     parser.parse_events()
     parser.parse_ball_xy()
 
@@ -72,9 +75,18 @@ def parse_kleague_data(data_path, match_id):
 
     return merged
 
-def load_and_save_data():
-    match_id_lst = [id for id in os.listdir(data_path) if "DS" not in id] # DF_Stores: acOS에서 Finder가 해당 폴더의 메타데이터를 저장하기 위해 자동으로 생성하는 숨김 파일
+def load_and_save_data(data_path):
+    """Load and process all match data, then save validated results.
     
+    This function processes all available K-League match data, performs
+    validation using the state machine, and saves the results to CSV files.
+    It filters out system files (DS_Store) and processes each match individually.
+    """
+    data_path = Path(data_path)
+    yaml_file = Path(base_path, "assertion", "transitions.yaml")
+
+    match_id_lst = [id for id in os.listdir(data_path) if "DS" not in id] # DF_Stores: acOS에서 Finder가 해당 폴더의 메타데이터를 저장하기 위해 자동으로 생성하는 숨김 파일
+    print(match_id_lst)
     for match_id in tqdm(match_id_lst, desc="Loading games"):  
         with open(f"{data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
             match_dict = pickle.load(f)
@@ -111,14 +123,27 @@ def load_and_save_data():
         # x=(-52.5, 52.5), y=(-34, 34)로 통일
 
         for col in ["start_x", "end_x"]:
-            valid_events[col] += PITCH_X_MIN
+            valid_events[col] += lsdpconfig.PITCH_X_MIN
         for col in ["start_y", "end_y"]:
-            valid_events[col] += PITCH_Y_MIN
+            valid_events[col] += lsdpconfig.PITCH_Y_MIN
 
         valid_events["type_name"] = valid_events["type_name"].map(lsdpconfig.versa_to_spadl_dict)
         valid_events = valid_events[valid_events["type_name"] != "non_action"].reset_index(drop=True)
         valid_events["type_id"] = valid_events["type_name"].apply(lambda t: lsdpconfig.spadl_actiontypes.index(t))
         valid_events.to_csv(Path(data_path / f"{match_id}/valid_events_filtered2.csv"), index=False)
 
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Process K-League data for assertion validation")
+    parser.add_argument("--data_path", type=str, default="path/to/data/bepro/processed",
+                       help="Path to the directory containing match data")
+    return parser.parse_args()
+    
 if __name__ == "__main__":
-    load_and_save_data()
+    args = parse_args()
+    base_path = Path(__file__).resolve().parent.parent
+
+    print(f"Base path: {base_path}")
+    print(f"Data path: {args.data_path}")
+    load_and_save_data(args.data_path)
+

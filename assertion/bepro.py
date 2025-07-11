@@ -1,4 +1,10 @@
-"""bepro data to LSDP converter."""
+"""BePro data to LSDP converter.
+
+This module converts BePro format soccer data to LSDP (Labelled Soccer Data Protocol)
+format. It handles data cleaning, coordinate transformations, event parsing,
+and various data corrections to ensure consistency and quality.
+"""
+
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
@@ -17,6 +23,10 @@ import assertion.config as lsdpconfig
 field_length = 105
 field_width = 68
 
+# Pitch dimensions for consistency with main project
+PITCH_X_MIN, PITCH_X_MAX = -52.5, 52.5
+PITCH_Y_MIN, PITCH_Y_MAX = -34.0, 34.0
+
 HEIGHT_POST = 2.5
 TOUCH_LINE_LENGTH = 105
 GOAL_LINE_LENGTH = 68
@@ -28,8 +38,17 @@ CENTER_POST = (LEFT_POST+RIGHT_POST) / 2
 Eighteen_YARD = 16.4592 # 18yard = 16.4592meter
 
 def convert_to_actions(events: pd.DataFrame) -> DataFrame[LSDPSchema]:
-    """
-    Convert K-league events to LSDP actions.
+    """Convert K-league events to LSDP actions.
+    
+    This function transforms BePro format event data into LSDP format,
+    performing data cleaning, coordinate transformations, and various
+    corrections to ensure data quality and consistency.
+    
+    Args:
+        events: DataFrame containing BePro format event data.
+        
+    Returns:
+        DataFrame[LSDPSchema]: Converted events in LSDP format.
     """
 
     events["period_id"] = events["period_order"] + 1 
@@ -119,12 +138,18 @@ def convert_to_actions(events: pd.DataFrame) -> DataFrame[LSDPSchema]:
 
     return cast(DataFrame[LSDPSchema], actions)
 
-def _convert_locations(events: pd.DataFrame) -> None:
-    '''
-    Home팀이 왼쪽에서 오른쪽으로 공격하는 방향으로 변환
-    Away팀이 오른쪽에서 왼쪽으로 공격하는 방향으로 변환
-    attack_direction: 공격하는 방향. if LEFT, Home팀이 오른쪽에서 왼쪽으로 공격
-    '''
+def _convert_locations(events: pd.DataFrame) -> pd.DataFrame:
+    """Convert coordinate system to standard orientation.
+    
+    This function normalizes the coordinate system so that the home team
+    always attacks from left to right, and the away team from right to left.
+    
+    Args:
+        events: DataFrame containing event data with coordinates.
+        
+    Returns:
+        pd.DataFrame: Events with normalized coordinate system.
+    """
 
     # left_to_right: Home팀이 왼쪽에서 오른쪽으로 공격하는 방향
     is_home = events.team == "Home"
@@ -142,14 +167,26 @@ def _convert_locations(events: pd.DataFrame) -> None:
     return events
 
 def _clean_events(df_events: pd.DataFrame, remove_event_types) -> pd.DataFrame:
-
-    """
-    데이터프레임에서 특정 이벤트 타입을 제거하는 함수.
-    remove_event_types (list): 제거할 이벤트 타입 목록
+    """Clean event data by removing specified event types and duplicates.
+    
+    This function removes unwanted event types and handles missing/duplicate data.
+    
+    Args:
+        df_events: DataFrame containing event data.
+        remove_event_types: List of event types to remove.
+        
+    Returns:
+        pd.DataFrame: Cleaned event data.
+        
+    Note:
+        - Missing data conditions: Events with empty event_types or missing
+          team_id/player_id information are removed.
+        - Duplicate conditions: Events with duplicate event_id or duplicate
+          data in other columns are removed.
 
     - 결측치 조건(missing_cond)
-    1.24	[Duel]	[Aerial]	...	NaN	NaN	NaN	NaN	NaN	NaN	[{'eventType': 'Duel', 'subEventType': 'Aerial...	NaN	NaN	35
-    67	85848	94916404	1	4641.0	259769.0	163181	0.193699	0.5342 event_types이 기록되어 있지 않는 경우 -> parsing이 불가능함, 단순히 이전 정보만으로는 예측 불가능
+    1.24    [Duel]  [Aerial]    ... NaN NaN NaN NaN NaN NaN [{'eventType': 'Duel', 'subEventType': 'Aerial...   NaN NaN 35
+    67  85848   94916404    1   4641.0  259769.0    163181  0.193699    0.5342 event_types이 기록되어 있지 않는 경우 -> parsing이 불가능함, 단순히 이전 정보만으로는 예측 불가능
     2. event_types이 기록되어 있는데, team_id & player_id정보가 기록되어 있지 않는 경우 -> 이전 정보로는 불가능하겠지만, 다음 정보로는 가능함.
     
     - 중복 데이터(duplicated_cond)
@@ -216,6 +253,19 @@ def add_related_info(events):
     return events
 
 def _fix_shot(df_actions: pd.DataFrame, home_team_id: int) -> pd.DataFrame:
+    """Fix shot events by correcting end coordinates based on shot result.
+    
+    This function corrects the end coordinates of shot events based on
+    their results (goal, blocked, off target, etc.) to ensure logical
+    consistency in the data.
+    
+    Args:
+        df_actions: DataFrame containing action data.
+        home_team_id: ID of the home team for coordinate calculations.
+        
+    Returns:
+        pd.DataFrame: Actions with corrected shot coordinates.
+    """
     away_idx = df_actions["team_id"] != home_team_id
 
     shot_type = [lsdpconfig.actiontypes.index("Shot"), lsdpconfig.actiontypes.index("Shot_Freekick"), 
@@ -279,6 +329,17 @@ def _fix_shot(df_actions: pd.DataFrame, home_team_id: int) -> pd.DataFrame:
     return df_actions
 
 def _fix_end_location(actions):
+    """Fix missing end locations for various event types.
+    
+    This function interpolates missing end coordinates for events that
+    don't have them defined, using various heuristics based on event type.
+    
+    Args:
+        actions: DataFrame containing action data.
+        
+    Returns:
+        pd.DataFrame: Actions with interpolated end locations.
+    """
     for _, period_actions in actions.groupby("period_id"):
         for idx, row in period_actions.iterrows():
             # 끝 위치가 정의되어 있는 경우는 건너뛰기
@@ -341,6 +402,17 @@ def _fix_end_location(actions):
     return actions
 
 def _find_duel_pairs(events: pd.DataFrame) -> pd.DataFrame:
+    """Find and pair duel events using Hungarian algorithm.
+    
+    This function identifies duel events and pairs them based on
+    temporal proximity using the Hungarian algorithm for optimal matching.
+    
+    Args:
+        events: DataFrame containing event data.
+        
+    Returns:
+        pd.DataFrame: Events with paired duel information.
+    """
     def _pair_duel_events(period_group: pd.DataFrame) -> pd.DataFrame:
         has_duel = period_group["event_types"].apply(lambda ets: any(e["event_name"] == "Duels" for e in ets))
         duel_events = period_group[has_duel].reset_index(drop=False) # drop=False: index를 기준으로 병합및 정렬
@@ -384,7 +456,17 @@ def _find_duel_pairs(events: pd.DataFrame) -> pd.DataFrame:
     return events.reset_index(drop=True)
 
 def _simplify(events: pd.DataFrame) -> pd.DataFrame:
-
+    """Simplify event types by mapping to VERSA action types.
+    
+    This function maps complex event types to simplified VERSA action types
+    for consistency in the LSDP format.
+    
+    Args:
+        events: DataFrame containing event data.
+        
+    Returns:
+        pd.DataFrame: Events with simplified action types.
+    """
     # VERSA에서 사용하는 actiontype으로 매핑
     actiontype_mapping = {
         #'Set Piece Defence': 'Clearance',

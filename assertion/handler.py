@@ -9,8 +9,26 @@ cols = [
 ]
 # Define Transition Conditions
 class ErrorHandler:
+    """Error handler for state machine validation failures.
+    
+    This class provides methods to handle and correct errors that occur
+    during state machine validation. It can create new events, modify
+    existing events, and adjust event sequences to maintain logical consistency.
+    
+    Attributes:
+        None
+    """
+    
     def _get_context(self, window, idx):
-
+        """Get context around the current event index.
+        
+        Args:
+            window: DataFrame containing events in a time window.
+            idx: Current event index.
+            
+        Returns:
+            tuple: (previous_events, current_event, next_events)
+        """
         prev = window.loc[:idx-1]     # 이전 이벤트
         cur = window.loc[idx]     # 현재 이벤트(현재 state에서 발생할 수 없는 이벤트)
         next = window.loc[idx+1:] # 이벤트 시퀀스 검증을 위함
@@ -18,6 +36,17 @@ class ErrorHandler:
         return prev, cur, next
     
     def _create_new_event(self, window, idx, type_name, **kwargs):
+        """Create a new event with specified type and parameters.
+        
+        Args:
+            window: DataFrame containing events in a time window.
+            idx: Current event index.
+            type_name: Type name for the new event.
+            **kwargs: Additional parameters to set in the new event.
+            
+        Returns:
+            pd.DataFrame: New event as a single-row DataFrame.
+        """
         prev, cur, next = self._get_context(window, idx)
 
         new_event = {

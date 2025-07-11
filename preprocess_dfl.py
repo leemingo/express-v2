@@ -11,7 +11,7 @@ from floodlight.io.dfl import read_position_data_xml, read_event_data_xml, read_
 import config
 from lxml import etree
 from tqdm import tqdm
-from typing import Dict, Tuple, Union
+from typing import Dict, Tuple, Union, Optional
 import warnings
 
 from floodlight.core.code import Code
@@ -25,107 +25,147 @@ from floodlight.io.dfl import _create_periods_from_dat, read_pitch_from_mat_info
 from utils_data import infer_ball_carrier
 import config as C
 
-period_dict = {"firstHalf": 1, "secondHalf": 2}
-# Load Data
-def load_data(path, file_name_pos, file_name_infos, file_name_events):
-    xy_objects, possession, ballstatus, teamsheets, pitch = read_position_data_xml(os.path.join(path, file_name_pos), 
-                                                                                   os.path.join(path, file_name_infos))
-    events, _, _ = read_event_data_xml(os.path.join(path, file_name_events), 
-                                       os.path.join(path, file_name_infos))
+# Constants
+PERIOD_DICT = {"firstHalf": 1, "secondHalf": 2}
+
+def load_data(path: str, file_name_pos: str, file_name_infos: str, file_name_events: str) -> Tuple[Dict, Dict, Pitch]:
+    """Loads DFL data using floodlight library functions.
+    
+    Args:
+        path: Base path containing the data files.
+        file_name_pos: Name of the position data file.
+        file_name_infos: Name of the match information file.
+        file_name_events: Name of the event data file.
+        
+    Returns:
+        Tuple containing (xy_objects, events, pitch) from floodlight library.
+    """
+    xy_objects, possession, ballstatus, teamsheets, pitch = read_position_data_xml(
+        os.path.join(path, file_name_pos), 
+        os.path.join(path, file_name_infos)
+    )
+    events, _, _ = read_event_data_xml(
+        os.path.join(path, file_name_events), 
+        os.path.join(path, file_name_infos)
+    )
     xy_objects["firstHalf"]["Home"].rotate(180)
     return xy_objects, events, pitch
 
-# Load Team Sheets
-def load_team_sheets(path):
+def load_team_sheets(path: str) -> pd.DataFrame:
+    """Loads team sheets from match information file.
+    
+    Args:
+        path: Path to the match directory containing team information.
+        
+    Returns:
+        DataFrame containing combined team information for both home and away teams.
+    """
     file_name_info = next((os.path.join(path, filename) for filename in os.listdir(path)
                            if "matchinformation" in filename), None)
 
     team_sheets = read_teamsheets_from_mat_info_xml(file_name_info)
 
-    # add 'team' attribute
+    # Add 'team' attribute
     home_team = team_sheets["Home"].teamsheet
     home_team["team"] = "Home"
     away_team = team_sheets["Away"].teamsheet
     away_team["team"] = "Away"
 
-    return pd.concat(
-        [home_team, away_team],
-        axis=0, sort=False
-    ).reset_index(drop=True)
+    return pd.concat([home_team, away_team], axis=0, sort=False).reset_index(drop=True)
 
-# Extract match ID from filename
-def extract_match_id(filename):
+def extract_match_id(filename: str) -> str:
+    """Extracts match ID from filename.
+    
+    Args:
+        filename: Name of the file containing match ID.
+        
+    Returns:
+        Extracted match ID string.
+    """
     parts = os.path.splitext(filename)[0].split('_')
     return parts[-1]
 
-# Load Event Data
-def load_event_data(path, teamsheet_home=None, teamsheet_away=None):
+def load_event_data(path: str, teamsheet_home: Optional[Teamsheet] = None, 
+                   teamsheet_away: Optional[Teamsheet] = None) -> pd.DataFrame:
+    """Loads event data from DFL XML files.
+    
+    Args:
+        path: Path to the match directory containing event data.
+        teamsheet_home: Optional teamsheet for home team.
+        teamsheet_away: Optional teamsheet for away team.
+        
+    Returns:
+        DataFrame containing all event data from both halves.
+    """
     file_name_info = next((os.path.join(path, filename) for filename in os.listdir(path)
                            if "matchinformation" in filename), None)
     file_name_event = next((os.path.join(path, filename) for filename in os.listdir(path)
                                 if "events_raw" in filename), None)
 
-    # Return type: Tuple[Dict[str, Dict[str, Events]], Dict[str, Teamsheet], Pitch]
     events, _, _ = read_event_data_xml(file_name_event, file_name_info,
                                         teamsheet_home=teamsheet_home, teamsheet_away=teamsheet_away)
     events_fullmatch = pd.DataFrame()
     for half in events:
         for team in events[half]:
-            # add 'period' and 'team' attributes
+            # Add 'period' and 'team' attributes
             half_df = events[half][team].events
             
-            half_df["period_id"] = period_dict[half]
+            half_df["period_id"] = PERIOD_DICT[half]
             half_df["team"] = team
 
             events_fullmatch = pd.concat(
                 [events_fullmatch, half_df],
-            axis=0, sort=False
+                axis=0, sort=False
             ).sort_values(by=["period_id", "gameclock"])
 
     return events_fullmatch.reset_index(drop=True)
 
-# Load Position Data
-def load_position_data(path, teamsheet_home=None, teamsheet_away=None, ):
+def load_position_data(path: str, teamsheet_home: Optional[Teamsheet] = None, 
+                      teamsheet_away: Optional[Teamsheet] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Loads position data from DFL XML files.
+    
+    Args:
+        path: Path to the match directory containing position data.
+        teamsheet_home: Optional teamsheet for home team.
+        teamsheet_away: Optional teamsheet for away team.
+        
+    Returns:
+        Tuple containing (tracking_fullmatch, teams) DataFrames.
+    """
     file_name_info = next((os.path.join(path, filename) for filename in os.listdir(path)
                            if "matchinformation" in filename), None)
     file_name_pos = next((os.path.join(path, filename) for filename in os.listdir(path) 
                           if "positions_raw" in filename), None)
 
-
-    # Return type: Tuple[Dict[str, Dict[str, XY]], Dict[str, Code], Dict[str, Code], Dict[str, Teamsheet], Pitch]
-    positions, possession, ballstatus, teamsheets, pitch = read_position_data_xml(file_name_pos, file_name_info,
-                                                    teamsheet_home=teamsheet_home, teamsheet_away=teamsheet_away)
+    positions, possession, ballstatus, teamsheets, pitch = read_position_data_xml(
+        file_name_pos, file_name_info,
+        teamsheet_home=teamsheet_home, teamsheet_away=teamsheet_away
+    )
     
-    # add 'team' attribute
+    # Add 'team' attribute
     home_team = teamsheets["Home"].teamsheet
     home_team["team"] = "Home"
     
     away_team = teamsheets["Away"].teamsheet
     away_team["team"] = "Away"
 
-    teams = pd.concat([home_team, away_team],
-        axis=0, sort=False
-    ).reset_index(drop=True)
+    teams = pd.concat([home_team, away_team], axis=0, sort=False).reset_index(drop=True)
 
     tracking_fullmatch = pd.DataFrame()
     for half in positions:
         tracking_halfmatch = pd.DataFrame()
         for team in positions[half]:
-            # add 'period' and 'time' attributes
+            # Add 'period' and 'time' attributes
             half_df = pd.DataFrame(positions[half][team].xy)
 
             # Home: H, Away: A, Ball: B
-            # even column index: x coordinate
-            # odd  column index: y coordinate, 
+            # Even column index: x coordinate, odd column index: y coordinate
             half_df.columns = [f"{team[0]}{i//2:02d}_{'x' if i % 2 == 0 else 'y'}" for i in range(len(half_df.columns))]
 
-            # axis=1: For the same time (index), home/away data should be merged horizontally so that both teams' positions for a given time appear side by side. 
-            tracking_halfmatch = pd.concat(
-                [tracking_halfmatch, half_df],
-                axis=1, sort=False
-            )
+            # Merge horizontally for same time
+            tracking_halfmatch = pd.concat([tracking_halfmatch, half_df], axis=1, sort=False)
 
-        tracking_halfmatch["period_id"] = period_dict[half]
+        tracking_halfmatch["period_id"] = PERIOD_DICT[half]
         tracking_halfmatch["time"] = tracking_halfmatch.index * 0.04  # 1 / 25 = 0.04 seconds per frame
 
         # axis=0: Different periods/times (from another half) should be appended vertically, stacking the rows in chronological order.
@@ -135,15 +175,18 @@ def load_position_data(path, teamsheet_home=None, teamsheet_away=None, ):
         ).sort_values(by=["period_id", "time"], kind="mergesort").reset_index(drop=True)
 
     return tracking_fullmatch, teams
-    return n_frames
 
-# Display Data Summary
-def display_data_summary(path):
+def display_data_summary(path: str) -> None:
+    """Displays summary information about the dataset.
+    
+    Args:
+        path: Path to the dataset directory.
+    """
     print(f"📂 Dataset path: {path}")
 
     team_sheets_all = load_team_sheets(path)
     all_events = load_event_data(path)
-    n_frames = load_position_data(path)
+    tracking_data, _ = load_position_data(path)
 
     print(f"📊 team_sheets_all 데이터 타입: {type(team_sheets_all)}")
     print(f"📏 team_sheets_all 크기: {team_sheets_all.shape if isinstance(team_sheets_all, pd.DataFrame) else 'N/A'}")
@@ -195,13 +238,17 @@ def display_data_summary(path):
 #     return events
 
 def convert_locations(positions: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert DFL locations to spadl coordinates.
-
+    """Converts DFL locations to SPADL coordinates.
+    
     DFL field dimensions: Pitch(xlim=(-52.5, 52.5), ylim=(-34.0, 34.0)
     SPADL field dimensions: Pitch(xlim=(0, 105), ylim=(0, 68))
+    
+    Args:
+        positions: DataFrame containing position data in DFL coordinates.
+        
+    Returns:
+        DataFrame with coordinates converted to SPADL format.
     """
-
     x_cols = [col for col in positions.columns if col.endswith("_x")]
     y_cols = [col for col in positions.columns if col.endswith("_y")] 
     positions[x_cols] += (config.field_length / 2)
@@ -212,8 +259,16 @@ def convert_locations(positions: pd.DataFrame) -> pd.DataFrame:
 
     return positions
 
-
 def add_position_info(events: pd.DataFrame, teams: pd.DataFrame) -> pd.DataFrame:
+    """Adds position information to events DataFrame.
+    
+    Args:
+        events: DataFrame containing event data.
+        teams: DataFrame containing team information.
+        
+    Returns:
+        DataFrame with position information added.
+    """
     team_position_mapping = teams[['player_id', 'position']]
     events = events.merge(team_position_mapping, on='player_id', how='left')
     return events
@@ -765,57 +820,100 @@ def read_position_data_xml(
 
     return data_objects
 
+def _apply_smoothing_and_outlier_removal(period_df: pd.DataFrame, col: str, 
+                                       is_outlier: pd.Series, smoothing_params: Dict) -> pd.DataFrame:
+    """Helper function to apply smoothing and outlier removal to a column.
+    
+    This function implements a comprehensive smoothing and outlier removal pipeline
+    using Savitzky-Golay filtering. It first masks outliers, interpolates missing
+    values, and then applies smoothing with appropriate parameter validation.
+    
+    Args:
+        period_df: DataFrame containing the period data.
+        col: Column name to apply smoothing to.
+        is_outlier: Boolean Series indicating outlier values.
+        smoothing_params: Dictionary containing smoothing parameters including
+                         'window_length' and 'polyorder'.
+        
+    Returns:
+        DataFrame with smoothed column values.
+        
+    Example:
+        >>> smoothed_df = _apply_smoothing_and_outlier_removal(
+        ...     period_df, 'vx', is_outlier, {'window_length': 11, 'polyorder': 3}
+        ... )
+    """
+    period_df[col] = period_df[col].mask(is_outlier)
+    period_df[col] = period_df[col].interpolate(limit_direction='both')
+    
+    data_to_smooth = period_df[col].fillna(0)
+    window_length = min(smoothing_params['window_length'], len(data_to_smooth))
+    if window_length % 2 == 0:
+        window_length -= 1
+    
+    if window_length >= smoothing_params['polyorder'] + 1 and window_length > 0:
+        period_df[col] = savgol_filter(data_to_smooth, window_length=window_length, polyorder=smoothing_params['polyorder'])
+    else:
+        period_df[col] = data_to_smooth
+    
+    return period_df
+
 def _calculate_kinematics(df: pd.DataFrame, smoothing_params: dict, max_speed: float, max_acceleration: float, is_ball: bool = False):
     """Calculates velocity and acceleration for a single agent over periods."""
     df_out = pd.DataFrame()
     required_cols = ['x', 'y', 'z', 'timestamp']
     if not all(col in df.columns for col in required_cols):
         print(f"Warning: Missing required columns in input dataframe. Found: {df.columns.tolist()}")
-        return df_out # Return empty if essential columns missing
+        return df_out
 
     for period_id in df['period_id'].unique():
         period_df = df[df['period_id'] == period_id].copy()
-        period_df = period_df.sort_values(by='timestamp') # Ensure order for diff
+        period_df = period_df.sort_values(by='timestamp').reset_index(drop=True)
 
-        # Calculate time difference (dt) safely
+        # Interpolate coordinates
+        period_df['x'] = period_df['x'].interpolate()
+        period_df['y'] = period_df['y'].interpolate()
+
+        # Calculate time difference
         dt = period_df['timestamp'].diff().dt.total_seconds()
-        # Avoid division by zero or large values for the first frame
-        # dt.iloc[0] = dt.median() # Use median dt for the first frame or a typical dt (e.g., 0.04)
-        # dt = dt.replace(0, np.nan).ffill().bfill() # Replace 0s, forward/backward fill NaNs
 
         # Calculate velocities
-        period_df['vx'] = period_df['x'].diff() / dt
-        period_df['vy'] = period_df['y'].diff() / dt
-        period_df['vz'] = period_df['z'].diff() / dt if is_ball else 0.0
-
-        # Smooth velocities (handle potential NaNs from diff)
         vel_cols = ['vx', 'vy', 'vz'] if is_ball else ['vx', 'vy']
+        coord_cols = ['x', 'y', 'z'] if is_ball else ['x', 'y']
+        
+        for vel_col, coord_col in zip(vel_cols, coord_cols):
+            period_df[vel_col] = period_df[coord_col].diff() / dt
+            if not is_ball and vel_col == 'vz':
+                period_df[vel_col] = 0.0
+
+        # Calculate speed and apply outlier removal
+        period_df['v'] = np.sqrt(sum(period_df[col]**2 for col in vel_cols))
+        is_speed_outlier = period_df['v'] > max_speed
+        
         for col in vel_cols:
-            data_to_smooth = period_df[col].fillna(0) # Fill NaNs before smoothing
-             # Ensure window length is odd and <= data length
-            window_length = min(smoothing_params['window_length'], len(data_to_smooth))
-            if window_length % 2 == 0: window_length -= 1 # Make odd
-            if window_length >= smoothing_params['polyorder'] + 1 and window_length > 0: # Basic check
-                period_df[col] = savgol_filter(data_to_smooth,
-                                              window_length=window_length,
-                                              polyorder=smoothing_params['polyorder'])
-            else: # Not enough data or invalid params, skip smoothing
-                period_df[col] = data_to_smooth
-
+            period_df = _apply_smoothing_and_outlier_removal(period_df, col, is_speed_outlier, smoothing_params)
+        
+        # Recalculate speed after smoothing
+        period_df['v'] = np.sqrt(sum(period_df[col]**2 for col in vel_cols))
+        
         # Calculate accelerations
-        period_df['ax'] = period_df['vx'].diff() / dt
-        period_df['ay'] = period_df['vy'].diff() / dt
-        period_df['az'] = period_df['vz'].diff() / dt if is_ball else 0.0
+        accel_cols = ['ax', 'ay', 'az'] if is_ball else ['ax', 'ay']
+        for accel_col, vel_col in zip(accel_cols, vel_cols):
+            period_df[accel_col] = period_df[vel_col].diff() / dt
+            if not is_ball and accel_col == 'az':
+                period_df[accel_col] = 0.0
 
-        # Fill NaN accelerations (occur at start and where dt was invalid)
-        accel_cols = ['ax', 'ay', 'az']
+        # Calculate acceleration magnitude and apply outlier removal
+        period_df['a'] = np.sqrt(sum(period_df[col]**2 for col in accel_cols))
+        is_accel_outlier = period_df['a'] > max_acceleration
+        
         for col in accel_cols:
-            period_df[col] = period_df[col].fillna(0)
-
-        # Calculate Speed and Acceleration Magnitude & Apply Caps
-        period_df['v'] = np.sqrt(period_df['vx']**2 + period_df['vy']**2 + period_df['vz']**2)
-        period_df['a'] = np.sqrt(period_df['ax']**2 + period_df['ay']**2 + period_df['az']**2)
-
+            period_df = _apply_smoothing_and_outlier_removal(period_df, col, is_accel_outlier, smoothing_params)
+        
+        # Recalculate acceleration after smoothing
+        period_df['a'] = np.sqrt(sum(period_df[col]**2 for col in accel_cols))
+        
+        # Limit speed and acceleration
         period_df['v'] = np.minimum(period_df['v'], max_speed)
         period_df['a'] = np.minimum(period_df['a'], max_acceleration)
 
@@ -823,28 +921,16 @@ def _calculate_kinematics(df: pd.DataFrame, smoothing_params: dict, max_speed: f
 
     return df_out
 
-def load_and_assemble_tracking_data(
-    path: str,
-    match_id: str,
-) -> pd.DataFrame:
-    """
-    Loads and preprocesses raw XML tracking data for a given match.
-
+def load_and_assemble_tracking_data(path: str, match_id: str) -> Tuple[pd.DataFrame, Optional[dict], Optional[dict]]:
+    """Loads and preprocesses raw XML tracking data for a given match.
+    
     Args:
-        path (str): Base path containing match folders.
-        match_id (str): The ID of the match to process.
-        player_smoothing_params (dict): Savgol filter params for players.
-        ball_smoothing_params (dict): Savgol filter params for the ball.
-        max_player_speed (float): Maximum plausible player speed.
-        max_player_acceleration (float): Maximum plausible player acceleration.
-        max_ball_speed (float): Maximum plausible ball speed.
-        max_ball_acceleration (float): Maximum plausible ball acceleration.
-
+        path: Base path containing match folders.
+        match_id: The ID of the match to process.
+        
     Returns:
-        pd.DataFrame: DataFrame with tracking data including calculated
-                      kinematics (vx, vy, vz, ax, ay, az, v, a) for all agents,
-                      structured in a long format with one row per agent per frame.
-                      Returns an empty DataFrame if loading or processing fails.
+        Tuple containing (tracking_fullmatch, teams_dict, pitch_meta).
+        Returns empty DataFrame and None values if loading or processing fails.
     """
     print(f"Processing match: {match_id}")
     match_path = os.path.join(path, match_id)
@@ -853,22 +939,29 @@ def load_and_assemble_tracking_data(
         print(f"Error: Match directory not found at {match_path}")
         return pd.DataFrame(), None, None
 
-    # --- 1. Find required files ---
+    # Find required files
     try:
-        # Updated filenames based on user's code
-        # file_name_pos = next((f for f in os.listdir(match_path) if "Positionsdaten-Spiel-Roh_Observed" in f), None)
-        file_name_pos = next((f for f in os.listdir(match_path) if "positions_raw_observed" in f), None)
-        file_name_info = next((f for f in os.listdir(match_path) if "matchinformation" in f), None)
-        # file_name_event = next((f for f in os.listdir(match_path) if "events_raw" in f), None) # Events not used in kinematics
+        # Handle different file naming patterns for dfl-confidential and dfl-spoho
+        # dfl-confidential: "Positionsdaten-Spiel-Roh_Observed_DFL-MAT-*.xml"
+        # dfl-spoho: "positions_raw_observed_DFL-COM-*.xml"
+        file_name_pos = next((f for f in os.listdir(match_path) 
+                             if any(pattern in f for pattern in 
+                                   ["positions_raw_observed", "Positionsdaten-Spiel-Roh_Observed"])), None)
+        
+        # Handle different match information file patterns
+        # Both use "matchinformation" but with different prefixes
+        file_name_info = next((f for f in os.listdir(match_path) 
+                              if "matchinformation" in f), None)
 
         if not file_name_pos or not file_name_info:
             print(f"Error: Position or Match Information file not found in {match_path}")
+            print(f"Available files: {os.listdir(match_path)}")
             return pd.DataFrame(), None, None
     except Exception as e:
         print(f"Error finding files in {match_path}: {e}")
         return pd.DataFrame(), None, None
 
-    # --- 2. Load Raw Data using external function ---
+    # Load raw data using external function
     try:
         print("Reading XML data...")
         pos_filepath = os.path.join(match_path, file_name_pos)
@@ -878,7 +971,7 @@ def load_and_assemble_tracking_data(
         print(f"Error reading XML data for {match_id}: {e}")
         return pd.DataFrame(), None, None
 
-    # --- 3. Prepare Team Info ---
+    # Prepare team info
     try:
         home_team = teamsheets["Home"].teamsheet
         home_team["team"] = "Home"
@@ -889,69 +982,69 @@ def load_and_assemble_tracking_data(
         print(f"Error processing teamsheets for {match_id}: {e}")
         return pd.DataFrame(), None, None
 
-    # --- 4. Initial DataFrame Assembly (Wide Format) ---
+    # Initial DataFrame assembly (wide format)
     print("Assembling initial wide DataFrame...")
     tracking_fullmatch = pd.DataFrame()
-    period_dict = {'firstHalf': 1, 'secondHalf': 2}
     try:
-        for half, period_id_val in period_dict.items():
-            if half not in xyds_objects: continue # Skip if half data missing
+        for half, period_id_val in PERIOD_DICT.items():
+            if half not in xyds_objects:
+                continue
 
             tracking_halfmatch = pd.DataFrame()
             processed_teams_in_half = set()
 
-            # Process Ball first if exists
+            # Process ball first if exists
             if 'Ball' in xyds_objects[half]:
-                 ball_df = pd.DataFrame(xyds_objects[half]['Ball'].xy)
-                 ball_df.columns = ['ball_x', 'ball_y', 'ball_z', 'ball_speed'] # Assuming order: x, y, z, speed
-                 tracking_halfmatch = pd.concat([tracking_halfmatch, ball_df], axis=1)
-                 processed_teams_in_half.add('Ball')
+                ball_df = pd.DataFrame(xyds_objects[half]['Ball'].xy)
+                ball_df.columns = ['ball_x', 'ball_y', 'ball_z', 'ball_speed']
+                tracking_halfmatch = pd.concat([tracking_halfmatch, ball_df], axis=1)
+                processed_teams_in_half.add('Ball')
 
-            # Process Home and Away teams
+            # Process home and away teams
             for team_name in ['Home', 'Away']:
                 if team_name in xyds_objects[half]:
                     team_id_info = teams_dict[team_name]
                     agent_ids = team_id_info['pID'].values
                     team_df = pd.DataFrame(xyds_objects[half][team_name].xy)
-                    # Assuming order x, y, distance, speed from XML parser output
                     team_df.columns = [f'{p_id}_{axis}' for p_id in agent_ids for axis in ['x', 'y', 'd', 's']]
                     tracking_halfmatch = pd.concat([tracking_halfmatch, team_df], axis=1)
                     processed_teams_in_half.add(team_name)
 
-            # Check if any team data was actually processed for the half
-            if tracking_halfmatch.empty: continue
+            if tracking_halfmatch.empty:
+                continue
 
             # Add metadata columns
             tracking_halfmatch["period_id"] = period_id_val
             tracking_halfmatch['frame_id'] = frames[half].code
             timestamp_half = pd.to_datetime(timestamp[half].code)
-            # Ensure timestamp has same index as tracking_halfmatch before assigning
             timestamp_half.index = tracking_halfmatch.index
-            tracking_halfmatch['timestamp'] = timestamp_half - timestamp_half[0] # Time relative to start of half
+            tracking_halfmatch['timestamp'] = timestamp_half - timestamp_half[0]
             
             if half in ballstatus:
                 tracking_halfmatch['ball_state'] = ballstatus[half].code
-                 # Map state code to lower string description
-                tracking_halfmatch['ball_state'] = tracking_halfmatch['ball_state'].map(lambda x: ballstatus[half].definitions[x].lower() if x in ballstatus[half].definitions else 'unknown')
-            else: tracking_halfmatch['ball_state'] = 'unknown'
+                tracking_halfmatch['ball_state'] = tracking_halfmatch['ball_state'].map(
+                    lambda x: ballstatus[half].definitions[x].lower() if x in ballstatus[half].definitions else 'unknown'
+                )
+            else:
+                tracking_halfmatch['ball_state'] = 'unknown'
 
             if half in possession:
                 tracking_halfmatch['ball_owning_team_id'] = possession[half].code
-                # Map possession code (0/1/etc) to team TID
                 def map_possession(code):
                     try:
                         team_name = possession[half].definitions[int(code)]
                         return teams_dict[team_name]['tID'].unique()[0]
                     except (KeyError, ValueError, IndexError):
-                        return 'Unknown' # Or None
+                        return 'Unknown'
                 tracking_halfmatch['ball_owning_team_id'] = tracking_halfmatch['ball_owning_team_id'].map(map_possession)
-            else: tracking_halfmatch['ball_owning_team_id'] = 'Unknown' # Or None
+            else:
+                tracking_halfmatch['ball_owning_team_id'] = 'Unknown'
 
             tracking_fullmatch = pd.concat([tracking_fullmatch, tracking_halfmatch], axis=0, sort=False)
 
         if tracking_fullmatch.empty:
-             print("Error: No tracking data assembled.")
-             return pd.DataFrame(), None, None
+            print("Error: No tracking data assembled.")
+            return pd.DataFrame(), None, None
 
         # Sort by time and reset index
         tracking_fullmatch = tracking_fullmatch.sort_values(
@@ -960,7 +1053,8 @@ def load_and_assemble_tracking_data(
 
     except Exception as e:
         print(f"Error assembling wide DataFrame for {match_id}: {e}")
-        import traceback; traceback.print_exc() # Print detailed error
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame(), None, None
     
     return tracking_fullmatch, teams_dict, pitch_meta
@@ -968,7 +1062,7 @@ def load_and_assemble_tracking_data(
 def reshape_and_calculate_kinematics(
     tracking_fullmatch: pd.DataFrame,
     teams_dict: dict,
-    match_id: str, # Pass match_id for context
+    match_id: str,
     player_smoothing_params: dict = C.DEFAULT_PLAYER_SMOOTHING_PARAMS,
     ball_smoothing_params: dict = C.DEFAULT_BALL_SMOOTHING_PARAMS,
     max_player_speed: float = C.MAX_PLAYER_SPEED,
@@ -976,17 +1070,31 @@ def reshape_and_calculate_kinematics(
     max_ball_speed: float = C.MAX_BALL_SPEED,
     max_ball_acceleration: float = C.MAX_BALL_ACCELERATION
 ) -> pd.DataFrame:
+    """Reshapes tracking data to long format and calculates kinematics for all agents.
     
+    Args:
+        tracking_fullmatch: Wide format DataFrame containing tracking data.
+        teams_dict: Dictionary containing team information.
+        match_id: Match ID for context.
+        player_smoothing_params: Savgol filter parameters for players.
+        ball_smoothing_params: Savgol filter parameters for the ball.
+        max_player_speed: Maximum plausible player speed.
+        max_player_acceleration: Maximum plausible player acceleration.
+        max_ball_speed: Maximum plausible ball speed.
+        max_ball_acceleration: Maximum plausible ball acceleration.
+        
+    Returns:
+        DataFrame with tracking data in long format including calculated kinematics.
+    """
     all_players_teamsheet = pd.concat([teams_dict['Home'], teams_dict['Away']], axis=0, sort=False).reset_index(drop=True)
     
-    # --- 5. Reshape to Long Format and Calculate Kinematics ---
+    # Reshape to long format and calculate kinematics
     print("Reshaping to long format and calculating kinematics...")
     tracking_long_final = pd.DataFrame()
     base_cols = ['period_id', 'timestamp', 'frame_id', 'ball_state', 'ball_owning_team_id']
-    # Ensure base columns exist
     base_cols = [col for col in base_cols if col in tracking_fullmatch.columns]
 
-    # Identify all unique agent IDs present (players + ball)
+    # Identify all unique agent IDs present
     player_cols = [col for col in tracking_fullmatch.columns if col.startswith("DFL")]
     agent_ids_present = set(col.split('_')[0] for col in player_cols)
     if 'ball_x' in tracking_fullmatch.columns:
@@ -998,17 +1106,16 @@ def reshape_and_calculate_kinematics(
         # Select columns for this agent
         if is_ball:
             agent_cols = [col for col in tracking_fullmatch.columns if col.startswith('ball_') and col[-2:] in ['_x', '_y', '_z', '_d', '_s']]
-            rename_map = {col: col.split('_')[1] for col in agent_cols} # ball_x -> x etc.
+            rename_map = {col: col.split('_')[1] for col in agent_cols}
         else:
             agent_cols = [col for col in tracking_fullmatch.columns if col.startswith(f"{agent_id}_") and col[-1] in ['x', 'y', 'z', 'd', 's']]
-            # We only need x,y for kinematics here based on original code
             rename_map = {f"{agent_id}_x": "x", f"{agent_id}_y": "y"}
 
         # Check if essential coordinate columns exist
         essential_coords = ['x', 'y'] if not is_ball else ['x', 'y', 'z']
         if not all(new_name in rename_map.values() for new_name in essential_coords):
-             print(f"Warning: Missing essential coordinates for agent {agent_id}. Skipping.")
-             continue
+            print(f"Warning: Missing essential coordinates for agent {agent_id}. Skipping.")
+            continue
 
         # Extract base + agent columns, then rename
         current_agent_df = tracking_fullmatch[base_cols + agent_cols].copy()
@@ -1020,19 +1127,21 @@ def reshape_and_calculate_kinematics(
 
         # Drop rows with NaN coordinates for players
         if not is_ball:
-            current_agent_df = current_agent_df.dropna(subset=['x', 'y'])
-            if current_agent_df.empty: continue # Skip if no valid data after dropna
+            current_agent_df = current_agent_df.dropna(subset=['x', 'y']).copy()
+            if current_agent_df.empty:
+                continue
 
-        # Calculate Kinematics using helper function
+        # Calculate kinematics using helper function
         smoothing = ball_smoothing_params if is_ball else player_smoothing_params
         max_v = max_ball_speed if is_ball else max_player_speed
         max_a = max_ball_acceleration if is_ball else max_player_acceleration
 
         kinematics_df = _calculate_kinematics(current_agent_df, smoothing, max_v, max_a, is_ball)
 
-        if kinematics_df.empty: continue # Skip if kinematics failed
+        if kinematics_df.empty:
+            continue
 
-        # Add Agent ID and Team/Position Info
+        # Add agent ID and team/position info
         kinematics_df['id'] = agent_id
         if is_ball:
             kinematics_df['team_id'] = 'ball'
@@ -1043,14 +1152,14 @@ def reshape_and_calculate_kinematics(
                 kinematics_df['team_id'] = player_info['tID']
                 kinematics_df['position_name'] = player_info['position']
             except (IndexError, KeyError):
-                 print(f"Warning: Could not find team/position info for player {agent_id}. Setting defaults.")
-                 kinematics_df['team_id'] = 'Unknown'
-                 kinematics_df['position_name'] = 'Unknown'
+                print(f"Warning: Could not find team/position info for player {agent_id}. Setting defaults.")
+                kinematics_df['team_id'] = 'Unknown'
+                kinematics_df['position_name'] = 'Unknown'
 
         # Append to the final long dataframe
         tracking_long_final = pd.concat([tracking_long_final, kinematics_df], ignore_index=True)
 
-    # --- 6. Final Sorting and Cleanup ---
+    # Final sorting and cleanup
     if tracking_long_final.empty:
         print(f"Error: No data processed for {match_id}.")
         return pd.DataFrame()
@@ -1076,13 +1185,13 @@ def reshape_and_calculate_kinematics(
         by=["period_id", "timestamp", "id"], kind="mergesort"
     ).reset_index(drop=True)
 
-    # Define final column order (example)
+    # Define final column order
     final_cols_order = [
         'game_id', 'period_id', 'timestamp', 'frame_id', 'ball_state', 'ball_owning_team_id',
         'x', 'y', 'z', 'vx', 'vy', 'vz', 'v', 'ax', 'ay', 'az', 'a',
-        'id', 'team_id', 'position_name',
-         #'is_ball_carrier', # 'absolute_timestamp' ?
+        'id', 'team_id', 'position_name'
     ]
+    
     # Add game_id
     tracking_long_final['game_id'] = match_id
     # Reorder, keeping only existing columns
@@ -1091,43 +1200,51 @@ def reshape_and_calculate_kinematics(
     print(f"Finished processing {match_id}. Final shape: {tracking_long_final.shape}")
     return tracking_long_final
 
-def load_all_data(data_path):
+def load_all_data(data_path: str) -> None:
+    """Loads and processes all data in the specified directory.
+    
+    Args:
+        data_path: Path to the directory containing match data.
+    """
     match_ids = os.listdir(data_path)
-    total_dict = {match_id : {} for match_id in match_ids}
+    total_dict = {match_id: {} for match_id in match_ids}
     processed_path = os.path.join(os.path.dirname(data_path), "processed")
+    
     for match_id in match_ids:
-        if not os.path.exists(f"{processed_path}/{match_id}/{match_id}_processed_dict.pkl"):
-            print(f"Preprocessing {match_id}")
-            tracking_df, teams_dict, pitch_meta = load_and_assemble_tracking_data(data_path, match_id)
-            if teams_dict is not None:
-                tracking_df = reshape_and_calculate_kinematics(tracking_df, teams_dict, match_id)
-                tracking_df = infer_ball_carrier(tracking_df)
-            else:
-                tracking_df = None
-            match_path = os.path.join(data_path, match_id)
-            event_df = load_event_data(match_path)
-            total_dict[match_id]['tracking_df'] = tracking_df
-            total_dict[match_id]['event_df'] = event_df
-            total_dict[match_id]['teams'] = teams_dict
-            total_dict[match_id]['pitch_meta'] = pitch_meta
-            with open(f"{processed_path}/{match_id}/{match_id}_processed_dict.pkl", "wb") as f:
-                pickle.dump(total_dict[match_id], f)
+        print(f"Preprocessing {match_id}")
+        tracking_df, teams_dict, pitch_meta = load_and_assemble_tracking_data(data_path, match_id)
+        if teams_dict is not None:
+            tracking_df = reshape_and_calculate_kinematics(tracking_df, teams_dict, match_id)
+            tracking_df = infer_ball_carrier(tracking_df)
         else:
-            with open(f"{processed_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
-                match_dict = pickle.load(f)
-            total_dict[match_id] = match_dict
+            tracking_df = None
+        match_path = os.path.join(data_path, match_id)
+        event_df = load_event_data(match_path)
+        total_dict[match_id]['tracking_df'] = tracking_df
+        total_dict[match_id]['event_df'] = event_df
+        total_dict[match_id]['teams'] = teams_dict
+        total_dict[match_id]['pitch_meta'] = pitch_meta
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(f"{processed_path}/{match_id}/{match_id}_processed_dict.pkl"), exist_ok=True)
+        with open(f"{processed_path}/{match_id}/{match_id}_processed_dict.pkl", "wb") as f:
+            pickle.dump(total_dict[match_id], f)
 
 
-def print_match_info(match_info_path):
+def print_match_info(match_info_path: str) -> Optional[dict]:
+    """Extracts and prints match information from the XML tree.
+    
+    Args:
+        match_info_path: Path to the match information XML file.
+        
+    Returns:
+        Dictionary containing general match attributes, or None if not found.
     """
-    Extracts and prints match information from the XML tree.
-    It looks for the <MatchInformation> tag and prints details from its child nodes.
-    """
-    # 0) set up XML tree
+    # Set up XML tree
     tree = etree.parse(match_info_path)
     root = tree.getroot()
     
-    # 1. Find the <MatchInformation> node within the root
+    # Find the <MatchInformation> node within the root
     match_info_node = None
     for child in root:
         if child.tag == "MatchInformation":
@@ -1136,33 +1253,28 @@ def print_match_info(match_info_path):
     
     if match_info_node is None:
         print("No <MatchInformation> tag found.")
-        return
+        return None
     
-    # 2. Initialize dictionaries to hold attributes from the child nodes
+    # Initialize dictionaries to hold attributes from the child nodes
     general_attrib = {}
     env_attrib = {}
     other_info_attrib = {}
     
-     # Iterate through the children of <MatchInformation>
+    # Iterate through the children of <MatchInformation>
     for subchild in match_info_node:
-        # General Tag
         if subchild.tag == "General":
             general_attrib = subchild.attrib
-        # Environment Tag
         elif subchild.tag == "Environment":
             env_attrib = subchild.attrib
-        # OtherGameInformation Tag (ex: Total game time)
         elif subchild.tag == "OtherGameInformation":
             other_info_attrib = subchild.attrib
     
-     # 3. Print general match information in a readable format
+    # Print general match information in a readable format
     print(f" - Competition: {general_attrib.get('CompetitionName', 'N/A')}")
     print(f" - Match Day: {general_attrib.get('MatchDay', 'N/A')}, Season: {general_attrib.get('Season', 'N/A')}")
     print(f" - Match Title: {general_attrib.get('MatchTitle', 'N/A')}")
-    # print(f" - Home Team: {general_attrib.get('HomeTeamName', 'N/A')} (ID: {general_attrib.get('HomeTeamId', '')})")
-    # print(f" - Guest Team: {general_attrib.get('GuestTeamName', 'N/A')} (ID: {general_attrib.get('GuestTeamId', '')})")
     print(f" - Result: {general_attrib.get('Result', 'N/A')}")
-    # print(f" - KickoffTime: {general_attrib.get('KickoffTime', 'N/A')}")
+    
     return general_attrib
     # 4. Print environment details
     # print("\n=== [Environment Info] ===")
@@ -1182,10 +1294,6 @@ def print_match_info(match_info_path):
     #     print(f" - TotalTimeSecondHalf: {other_info_attrib.get('TotalTimeSecondHalf', 'N/A')}")
     #     print(f" - PlayingTimeFirstHalf: {other_info_attrib.get('PlayingTimeFirstHalf', 'N/A')}")
     #     print(f" - PlayingTimeSecondHalf: {other_info_attrib.get('PlayingTimeSecondHalf', 'N/A')}")
-
-
-
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Preprocess DFL raw tracking data.")

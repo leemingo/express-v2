@@ -1,5 +1,23 @@
 class Condition:
+    """Condition checker for state machine transitions.
+    
+    This class provides methods to check various conditions that determine
+    whether state transitions are valid in the soccer event state machine.
+    
+    Attributes:
+        None
+    """
+    
     def _get_context(self, window, idx):
+        """Get context around the current event index.
+        
+        Args:
+            window: DataFrame containing events in a time window.
+            idx: Current event index.
+            
+        Returns:
+            tuple: (previous_events, current_event, next_events)
+        """
         prev = window.loc[:idx-1]     # 이전 이벤트
         cur = window.loc[idx]     # 현재 이벤트(현재 state에서 발생할 수 없는 이벤트)
         next = window.loc[idx+1:] # 이벤트 시퀀스 검증을 위함
@@ -8,6 +26,16 @@ class Condition:
     
     # ----미래 이벤트 조건----
     def is_next_event(self, window, idx, type_names):
+        """Check if the next event matches any of the specified types.
+        
+        Args:
+            window: DataFrame containing events in a time window.
+            idx: Current event index.
+            type_names: List of event type names to check for.
+            
+        Returns:
+            bool: True if next event matches any specified type or if no next event exists.
+        """
         prev, cur, next = self._get_context(window, idx)
 
         return next.empty or any(next.iloc[0]['type_name'] == t for t in type_names) # 경기가 종료되거나 다음 이벤트가 발생해야함
@@ -79,6 +107,15 @@ class Condition:
         )
     
     def is_intended_receiver(self, window, idx):
+        """Check if the current event is the intended receiver of a previous pass.
+        
+        Args:
+            window: DataFrame containing events in a time window.
+            idx: Current event index.
+            
+        Returns:
+            bool: True if current event is the intended receiver or if pass was unsuccessful.
+        """
         prev, cur, next = self._get_context(window, idx)
         pass_like = [
             "Pass",
