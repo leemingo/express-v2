@@ -9,6 +9,15 @@ BALL_CARRIER_THRESHOLD: float = 25.0
 PITCH_X_MIN, PITCH_X_MAX = -52.5, 52.5
 PITCH_Y_MIN, PITCH_Y_MAX = -34.0, 34.0
 
+FEAT_MIN = [-52.5, -32., -63., -54., 0., -970., -600., 0., 0., 0., 0., -1., -1, 0., -1., -1., -1., -1.]
+FEAT_MAX = [52.5, 32., 83., 153., 28., 1405., 625., 13.5, 1., 1., 113., 1., 1., 111., 1., 1., 1., 1.]
+
+TYPE_NAME= [
+    'Recovery', 'Catch', 'Carry', 'Cross Received', 'Defensive Line Support', 'Intervention',  'Own Goal', 
+    'Interception', 'Tackle', 'Penalty Kick', 'Duel', 'Goal', 'Ball Received',  'Pass Received', 'Block', 
+    'Pass', 'Throw-In', 'Goal Post', 'Pass_Freekick', 'Shot_Freekick',  'Pass_Corner', 'Foul', 'Cross', 
+    'Aerial Clearance', 'Clearance', 'Error', 'Out',  'Offside', 'Shot', 'Take-On', 'Parry', 'Goal Kick'
+    ]
 class Constant:
     BALL = "ball"
 

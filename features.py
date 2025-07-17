@@ -14,6 +14,20 @@ os.chdir('..')
 import config as C
 current_dir = os.path.dirname(__file__)
 
+def action_type(merged_df) -> pd.DataFrame:
+    type_name_to_id = {name: i for i, name in enumerate(C.TYPE_NAME)}
+
+    # 문자열을 정수 인덱스로 매핑
+    result = merged_df['type_name'].map(type_name_to_id)
+
+    C.TYPE_NAME
+    return pd.DataFrame({
+        'action_id': merged_df['action_id'],
+        'time_seconds': merged_df['time_seconds'],
+        'action_type': result.astype(int)
+    }, index=merged_df.index)
+
+
 def distance_ball_goal(merged_df):
     """
     각 이벤트 시점의 공과 해당 팀의 골대 사이의 거리를 계산합니다.
@@ -235,7 +249,7 @@ def def_goal(merged_df: pd.DataFrame) -> pd.DataFrame:
 def goal_diff(merged_df) -> pd.DataFrame:
 
     goal_results = cumul_goal(merged_df)   
-    goal_diff_series = goal_results['att_goal_count'] - goal_results['def_goal_count']
+    goal_diff_series = abs(goal_results['att_goal_count'] - goal_results['def_goal_count'])
     
     return pd.DataFrame({
         'action_id': merged_df['action_id'],

@@ -98,7 +98,7 @@ if __name__ == "__main__":
     os.makedirs(processed_data_path, exist_ok=True)
 
     match_ids = sorted(os.listdir(raw_data_path))
-    for match_id in tqdm(match_ids[13:]):
+    for match_id in tqdm(match_ids[:24]):
         try:
             print(f"▶ Processing match: {match_id}")
             tracking_df, event_df, teams_dict = data_collect(match_id)

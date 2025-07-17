@@ -13,6 +13,9 @@ from tqdm import tqdm
 from pressing_intensity import CustomPressingIntensity
 from config import *
 
+import scipy.signal as signal
+from scipy.ndimage import shift
+
 coordinates = "secondspectrum"
 num_agents = 23
 num_team_players = 11
@@ -23,6 +26,61 @@ PITCH_LENGTH = 105.0
 PITCH_WIDTH = 68.0
 CENTER_X = PITCH_LENGTH / 2 # 52.5
 CENTER_Y = PITCH_WIDTH / 2  # 34.0
+
+def calc_single_agent_velocities(traces: pd.DataFrame, remove_outliers=True, smoothing=True):
+    if remove_outliers:
+        MAX_SPEED = 12
+        MAX_ACCEL = 8
+
+    if smoothing:
+        W_LEN = 9
+        P_ORDER = 2
+
+    x = traces["x"]
+    y = traces["y"]
+
+    if smoothing:
+        x = pd.Series(signal.savgol_filter(x, window_length=21, polyorder=P_ORDER), index=x.index)
+        y = pd.Series(signal.savgol_filter(y, window_length=21, polyorder=P_ORDER), index=y.index)
+
+    fps = 25
+    vx = np.diff(x.values, prepend=x.iloc[0]) / (1 / fps)
+    vy = np.diff(y.values, prepend=y.iloc[0]) / (1 / fps)
+
+    if remove_outliers:
+        speeds = np.sqrt(vx**2 + vy**2)
+        is_speed_outlier = speeds > MAX_SPEED
+        is_accel_outlier = np.abs(np.diff(speeds, append=speeds[-1]) / (1 / fps)) > MAX_ACCEL
+        is_outlier = is_speed_outlier | is_accel_outlier | shift(is_accel_outlier, 1, cval=True)
+        vx = pd.Series(np.where(is_outlier, np.nan, vx)).interpolate(limit_direction="both").values
+        vy = pd.Series(np.where(is_outlier, np.nan, vy)).interpolate(limit_direction="both").values
+
+    if smoothing:
+        vx = signal.savgol_filter(vx, window_length=W_LEN, polyorder=P_ORDER)
+        vy = signal.savgol_filter(vy, window_length=W_LEN, polyorder=P_ORDER)
+
+    speeds = np.sqrt(vx**2 + vy**2)
+
+    ax = np.diff(vx, prepend=vx[0]) / (1 / fps)
+    ay = np.diff(vy, prepend=vy[0]) / (1 / fps)
+    
+    if remove_outliers:
+        accel = np.sqrt(ax**2 + ay**2)
+        is_accel_outlier = accel > MAX_ACCEL
+        is_outlier = is_accel_outlier | shift(is_accel_outlier, 1, cval=True)
+        ax = pd.Series(np.where(is_outlier, np.nan, ax)).interpolate(limit_direction="both").values
+        ay = pd.Series(np.where(is_outlier, np.nan, ay)).interpolate(limit_direction="both").values
+
+    if smoothing:
+        ax = signal.savgol_filter(ax, window_length=W_LEN, polyorder=P_ORDER)
+        ay = signal.savgol_filter(ay, window_length=W_LEN, polyorder=P_ORDER)
+
+    accels = np.sqrt(ax**2 + ay**2)
+
+    feature_cols = ['x', 'y', 'vx', 'vy', 'v', 'ax', 'ay', 'a']
+    traces.loc[x.index, feature_cols] = np.stack([x, y, vx, vy, speeds, ax, ay, accels]).round(6).T
+
+    return traces
 
 
 class PressingSequenceDataset(Dataset):
@@ -319,8 +377,7 @@ class PressingSequenceDataset(Dataset):
                 total_dict[match_id] = {}
                 with open(f"{data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
                     match_dict = pickle.load(f)
-                tracking_df = match_dict['tracking_df'].copy()
-                
+                tracking_df = match_dict['tracking_df'].copy()                
                 teams_dict = match_dict['teams'].copy()
                 home_team = teams_dict['Home'].copy()
                 away_team = teams_dict['Away'].copy()
@@ -328,7 +385,13 @@ class PressingSequenceDataset(Dataset):
                 meta_data = match_dict['meta_data']
                 # Make the direction unified.
                 
-                tracking_df = self._normalize_coordinate_direction(tracking_df, teams_dict['Home']['pID'].iloc[0])
+                tracking_df = tracking_df.drop(columns=["vx", "vy", "ax", "ay", "v", "a"])         
+                tracking_df = tracking_df.groupby(['game_id', 'period_id', 'id']).apply(
+                    calc_single_agent_velocities, include_groups=False
+                ).reset_index(drop=False).drop(columns=['level_3'])
+                tracking_df = tracking_df.sort_values(['game_id', 'period_id', 'frame_id']).reset_index(drop=True)
+
+                tracking_df = self._normalize_coordinate_direction(tracking_df, teams_dict['Home']['tID'].iloc[0])
                 
                 with open(f"{data_path}/{match_id}/{match_id}_presing_intensity.pkl", "rb") as f:
                     pressing_df = pickle.load(f)
