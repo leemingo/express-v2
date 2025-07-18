@@ -33,7 +33,7 @@ class PressingSequenceDataset(Dataset):
         self.feature_cols = feature_cols if feature_cols else self._infer_feature_cols()
         # Load and process data to create samples
         self.cols_to_flip = ['x', 'y', 'vx', 'vy', 'ax', 'ay']
-        # self._load_data()
+        self._load_data()
     
     def _normalize_coordinate_direction(self, df, home_team_id):
         """
@@ -332,7 +332,6 @@ class PressingSequenceDataset(Dataset):
                     continue
                 
                 total_df = self._merge_tracking_pressing_df(tracking_df, pressing_df, teams_df)
-                total_df = total_df[total_df['ball_state'] != 'dead'] # Need to be considered more.
                 total_dict[match_id]['tracking_df'] = total_df
                 total_dict[match_id]['event_df'] = event_df
                 total_dict[match_id]['meta_data'] = meta_data
@@ -574,6 +573,19 @@ class PressingSequenceDataset(Dataset):
                 self.presser_ids = all_presser_ids
                 self.agent_orders = all_agent_orders
                 self.match_infos = all_match_infos
+                
+                # Create data list for compatibility with other dataset classes
+                self.data = []
+                for i in range(len(self.features_seqs)):
+                    self.data.append({
+                        'features': self.features_seqs[i],
+                        'pressing_intensity': self.pressintensity_seqs[i],
+                        'label': self.labels[i],
+                        'pressed_id': self.pressed_ids[i],
+                        'presser_id': self.presser_ids[i],
+                        'agent_order': self.agent_orders[i],
+                        'match_info': self.match_infos[i]
+                    })
 
     def _infer_feature_cols(self):
         ignore = ['game_id', 'period_id', 'timestamp', 'ball_owning_team_id']
@@ -859,20 +871,51 @@ class ToSoccerMapTensor:
 
 # --- Dataset Class (Loads Pickled Sequence Data, Applies Transform) ---
 class SoccerMapInputDataset(Dataset): # Renamed from PressingFrameDataset
-    def __init__(self, pickled_dataset_path):
-        """Loads data from the pickled PressingSequenceDataset object."""
-        print(f"Loading dataset from {pickled_dataset_path}...")
-        try:
-            with open(pickled_dataset_path, "rb") as f:
-                # Load the dictionary saved by PressingSequenceDataset
-                self.loaded_data = pickle.load(f)
+    def __init__(self, pickled_dataset_path=None, data_path=None, match_id_lst=None, sequence_length=150, feature_cols=None):
+        """
+        Loads data from the pickled PressingSequenceDataset object or creates new dataset.
+        
+        Args:
+            pickled_dataset_path (str, optional): Path to pickled dataset file
+            data_path (str, optional): Path to raw data directory (used if pickled_dataset_path is None)
+            match_id_lst (list, optional): List of match IDs (used if pickled_dataset_path is None)
+            sequence_length (int): Length of sequences (used if pickled_dataset_path is None)
+            feature_cols (list, optional): Feature columns to use (used if pickled_dataset_path is None)
+        """
+        if pickled_dataset_path and os.path.exists(pickled_dataset_path):
+            print(f"Loading dataset from {pickled_dataset_path}...")
+            try:
+                with open(pickled_dataset_path, "rb") as f:
+                    # Load the dictionary saved by PressingSequenceDataset
+                    self.loaded_data = pickle.load(f)
+                print(f"Successfully loaded {len(self.loaded_data)} samples from pickle file.")
+            except FileNotFoundError:
+                print(f"Error: Dataset file not found at {pickled_dataset_path}")
+                raise
+            except Exception as e:
+                print(f"Error loading pickled dataset: {e}")
+                raise
+        else:
+            if data_path is None or match_id_lst is None:
+                raise ValueError("If pickled_dataset_path is not provided, both data_path and match_id_lst must be provided.")
+            
+            print(f"Creating new dataset from {data_path} with {len(match_id_lst)} matches...")
+            try:
+                # Create PressingSequenceDataset and extract its data
+                temp_dataset = PressingSequenceDataset(
+                    data_path=data_path,
+                    match_id_lst=match_id_lst,
+                    sequence_length=sequence_length,
+                    feature_cols=feature_cols
+                )
+                self.loaded_data = temp_dataset.data
+                print(f"Successfully created dataset with {len(self.loaded_data)} samples.")
+            except Exception as e:
+                print(f"Error creating dataset: {e}")
+                raise
 
-            # Initialize transformer here, used in __getitem__
-            self.transform = ToSoccerMapTensor()
-        except FileNotFoundError:
-            print(f"Error: Dataset file not found at {pickled_dataset_path}")
-        except Exception as e:
-            print(f"Error loading pickled dataset: {e}")
+        # Initialize transformer here, used in __getitem__
+        self.transform = ToSoccerMapTensor()
         
     def __len__(self):
         return len(self.loaded_data)
@@ -887,17 +930,48 @@ class SoccerMapInputDataset(Dataset): # Renamed from PressingFrameDataset
         return spatial_map, label
 
 class exPressInputDataset(Dataset):
-    def __init__(self, pickled_dataset_path):
-        """Loads data from the pickled PressingSequenceDataset object."""
-        print(f"Loading dataset from {pickled_dataset_path}...")
-        try:
-            with open(pickled_dataset_path, "rb") as f:
-                # Load the dictionary saved by PressingSequenceDataset
-                self.loaded_data = pickle.load(f)
-        except FileNotFoundError:
-            print(f"Error: Dataset file not found at {pickled_dataset_path}")
-        except Exception as e:
-            print(f"Error loading pickled dataset: {e}")
+    def __init__(self, pickled_dataset_path=None, data_path=None, match_id_lst=None, sequence_length=150, feature_cols=None):
+        """
+        Loads data from the pickled PressingSequenceDataset object or creates new dataset.
+        
+        Args:
+            pickled_dataset_path (str, optional): Path to pickled dataset file
+            data_path (str, optional): Path to raw data directory (used if pickled_dataset_path is None)
+            match_id_lst (list, optional): List of match IDs (used if pickled_dataset_path is None)
+            sequence_length (int): Length of sequences (used if pickled_dataset_path is None)
+            feature_cols (list, optional): Feature columns to use (used if pickled_dataset_path is None)
+        """
+        if pickled_dataset_path and os.path.exists(pickled_dataset_path):
+            print(f"Loading dataset from {pickled_dataset_path}...")
+            try:
+                with open(pickled_dataset_path, "rb") as f:
+                    # Load the dictionary saved by PressingSequenceDataset
+                    self.loaded_data = pickle.load(f)
+                print(f"Successfully loaded {len(self.loaded_data)} samples from pickle file.")
+            except FileNotFoundError:
+                print(f"Error: Dataset file not found at {pickled_dataset_path}")
+                raise
+            except Exception as e:
+                print(f"Error loading pickled dataset: {e}")
+                raise
+        else:
+            if data_path is None or match_id_lst is None:
+                raise ValueError("If pickled_dataset_path is not provided, both data_path and match_id_lst must be provided.")
+            
+            print(f"Creating new dataset from {data_path} with {len(match_id_lst)} matches...")
+            try:
+                # Create PressingSequenceDataset and extract its data
+                temp_dataset = PressingSequenceDataset(
+                    data_path=data_path,
+                    match_id_lst=match_id_lst,
+                    sequence_length=sequence_length,
+                    feature_cols=feature_cols
+                )
+                self.loaded_data = temp_dataset.data
+                print(f"Successfully created dataset with {len(self.loaded_data)} samples.")
+            except Exception as e:
+                print(f"Error creating dataset: {e}")
+                raise
 
         # Normalization
         self.feature_min_vals = torch.Tensor(FEAT_MIN[:19])
@@ -910,17 +984,6 @@ class exPressInputDataset(Dataset):
         self.feature_ranges = self.max_vals - self.min_vals
          # Prevent division by zero for constant features
         self.feature_ranges[self.feature_ranges == 0] = 1.0 
-
-        # scaler_path = os.path.join(os.path.dirname(pickled_dataset_path), "scaler.pkl")
-        # with open(scaler_path, "rb") as f:
-        #     scaler = pickle.load(f)
-        #     self.feature_mean = scaler['mean']
-        #     self.feature_std = scaler['std']
-        #     self.continuous_indices = scaler['continuous_indices']
-
-        # self.mean_vals = self.feature_mean.reshape(1, 1, -1)
-        # self.std_vals = self.feature_std.reshape(1, 1, -1)
-
 
     def __len__(self):
         """Returns the total number of samples."""
@@ -973,32 +1036,120 @@ class exPressInputDataset(Dataset):
 
 
 if __name__ == "__main__":
-    data_path = "/data/MHL/bepro/processed"
-    save_path = "/data/MHL/pressing-intensity-v2"
-    os.makedirs(save_path, exist_ok=True)
-
-    match_id_lst = os.listdir(data_path)
+    import argparse
+    
+    # Argument parser 설정
+    parser = argparse.ArgumentParser(description="Generate pressing intensity datasets from processed match data.")
+    parser.add_argument(
+        "--data_path", 
+        type=str, 
+        default="/path/to/data",
+        help="Path to the directory containing processed match data"
+    )
+    parser.add_argument(
+        "--save_path", 
+        type=str, 
+        default="/path/to/save",
+        help="Path to save the generated datasets"
+    )
+    parser.add_argument(
+        "--exclude_matches", 
+        type=str, 
+        nargs="+",
+        default=["126319", "153381", "153390", "126285"],
+        help="List of match IDs to exclude from processing"
+    )
+    parser.add_argument(
+        "--train_ratio", 
+        type=float, 
+        default=0.8,
+        help="Ratio of matches to use for training"
+    )
+    parser.add_argument(
+        "--valid_ratio", 
+        type=float, 
+        default=0.1,
+        help="Ratio of matches to use for validation"
+    )
+    parser.add_argument(
+        "--test_ratio", 
+        type=float, 
+        default=0.1,
+        help="Ratio of matches to use for testing"
+    )
+    parser.add_argument(
+        "--verbose", 
+        action="store_true",
+        help="Enable verbose output"
+    )
+    
+    args = parser.parse_args()
+    
+    # 경로 유효성 검사
+    if not os.path.exists(args.data_path):
+        print(f"Error: Data path '{args.data_path}' does not exist.")
+        exit(1)
+    
+    # 저장 경로 생성
+    os.makedirs(args.save_path, exist_ok=True)
+    
+    # 비율 검증
+    total_ratio = args.train_ratio + args.valid_ratio + args.test_ratio
+    if abs(total_ratio - 1.0) > 1e-6:
+        print(f"Warning: Train, valid, and test ratios sum to {total_ratio}, not 1.0")
+        print("Adjusting ratios to sum to 1.0...")
+        args.train_ratio /= total_ratio
+        args.valid_ratio /= total_ratio
+        args.test_ratio /= total_ratio
+    
+    # 매치 ID 목록 가져오기
+    match_id_lst = os.listdir(args.data_path)
     match_id_lst.sort()
-    match_id_lst = [match_id for match_id in match_id_lst if match_id not in ["126319", "153381", "153390", "126285"]]
-
-    train_match_id_lst = match_id_lst[:-6]
-    valid_match_id_lst = match_id_lst[-6:-3]
-    test_match_id_lst = match_id_lst[-3:]
+    
+    # 제외할 매치 필터링
+    match_id_lst = [match_id for match_id in match_id_lst if match_id not in args.exclude_matches]
+    
+    if args.verbose:
+        print(f"Total matches found: {len(match_id_lst)}")
+        print(f"Excluded matches: {args.exclude_matches}")
+    
+    # 데이터셋 분할
+    total_matches = len(match_id_lst)
+    train_end = int(total_matches * args.train_ratio)
+    valid_end = train_end + int(total_matches * args.valid_ratio)
+    
+    train_match_id_lst = match_id_lst[:train_end]
+    valid_match_id_lst = match_id_lst[train_end:valid_end]
+    test_match_id_lst = match_id_lst[valid_end:]
+    
     print(f"Train Match IDs({len(train_match_id_lst)}): {train_match_id_lst}")
     print(f"Valid Match IDs({len(valid_match_id_lst)}): {valid_match_id_lst}")
     print(f"Test Match IDs({len(test_match_id_lst)}): {test_match_id_lst}")
     
-    # train_match_id_lst = ["153379"]
-    train_dataset = PressingSequenceDataset(data_path, match_id_lst=train_match_id_lst)
-    valid_dataset = PressingSequenceDataset(data_path, match_id_lst=valid_match_id_lst)
-    test_dataset = PressingSequenceDataset(data_path, match_id_lst=test_match_id_lst)
+    # 데이터셋 생성
+    print("Creating training dataset...")
+    train_dataset = PressingSequenceDataset(args.data_path, match_id_lst=train_match_id_lst)
     
-    print("Saving path:", save_path)
-    with open(f"{save_path}/train_dataset.pkl", "wb") as f:
+    print("Creating validation dataset...")
+    valid_dataset = PressingSequenceDataset(args.data_path, match_id_lst=valid_match_id_lst)
+    
+    print("Creating test dataset...")
+    test_dataset = PressingSequenceDataset(args.data_path, match_id_lst=test_match_id_lst)
+    
+    # 데이터셋 저장
+    print(f"Saving datasets to: {args.save_path}")
+    
+    with open(f"{args.save_path}/train_dataset.pkl", "wb") as f:
         pickle.dump(train_dataset, f)
-    with open(f"{save_path}/valid_dataset.pkl", "wb") as f:
+    print(f"Training dataset saved: {len(train_dataset)} samples")
+    
+    with open(f"{args.save_path}/valid_dataset.pkl", "wb") as f:
         pickle.dump(valid_dataset, f)
-    with open(f"{save_path}/test_dataset.pkl", "wb") as f:
+    print(f"Validation dataset saved: {len(valid_dataset)} samples")
+    
+    with open(f"{args.save_path}/test_dataset.pkl", "wb") as f:
         pickle.dump(test_dataset, f)
-    print("Done")
+    print(f"Test dataset saved: {len(test_dataset)} samples")
+    
+    print("Dataset generation completed successfully!")
     

@@ -249,12 +249,13 @@ def _calculate_kinematics(df: pd.DataFrame, smoothing_params: Dict, max_speed: f
         dt = period_df['timestamp'].diff().dt.total_seconds()
 
         # Calculate velocities
-        vel_cols = ['vx', 'vy', 'vz'] if is_ball else ['vx', 'vy']
-        coord_cols = ['x', 'y', 'z'] if is_ball else ['x', 'y']
+        coord_cols = ['x', 'y', 'z']
+        vel_cols = ['vx', 'vy', 'vz']
+        accel_cols = ['ax', 'ay', 'az']
         
         for vel_col, coord_col in zip(vel_cols, coord_cols):
             period_df[vel_col] = period_df[coord_col].diff() / dt
-            if not is_ball and vel_col == 'vz':
+            if vel_col == 'vz':
                 period_df[vel_col] = 0.0
 
         # Calculate speed and apply outlier removal
@@ -268,10 +269,9 @@ def _calculate_kinematics(df: pd.DataFrame, smoothing_params: Dict, max_speed: f
         period_df['v'] = np.sqrt(sum(period_df[col]**2 for col in vel_cols))
         
         # Calculate accelerations
-        accel_cols = ['ax', 'ay', 'az'] if is_ball else ['ax', 'ay']
         for accel_col, vel_col in zip(accel_cols, vel_cols):
             period_df[accel_col] = period_df[vel_col].diff() / dt
-            if not is_ball and accel_col == 'az':
+            if accel_col == 'az':
                 period_df[accel_col] = 0.0
 
         # Calculate acceleration magnitude and apply outlier removal
