@@ -99,7 +99,7 @@ This step includes:
 ### 2. Event Data Validation and SPADL Conversion
 
 ```bash
-python assertion/assert.py
+python assertion/assert.py --data_path /path/to/process/data
 ```
 
 This step includes:

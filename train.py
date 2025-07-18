@@ -10,7 +10,7 @@ if __name__ == "__main__":
     # parser.add_argument("--model_type", type=str, default="soccermap", choices=['soccermap', 'xgboost', 'exPress'], help="Path to the model checkpoint (.ckpt) file saved during training.")
     # parser.add_argument("--root_path", type=str, default="/data/MHL/pressing-intensity", help="Path to the data file.")
     parser.add_argument("--model_type", type=str, default="exPress", choices=['soccermap', 'xgboost', 'exPress'], help="Path to the model checkpoint (.ckpt) file saved during training.")
-    parser.add_argument("--root_path", type=str, default="/data/MHL/pressing-intensity-v2", help="Path to the data file.")
+    parser.add_argument("--root_path", type=str, help="Path to the data file.")
     parser.add_argument("--mode", type=str, default="train", choices=['train', 'test'], help="Mode: 'train' or 'test'.")
     parser.add_argument("--ckpt_path", type=str, default=None, help="Path to checkpoint file (Required for 'test' mode).")
     parser.add_argument("--params_path", type=str, default="params.json", help="Path to the JSON containing configurations.")

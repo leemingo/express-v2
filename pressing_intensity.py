@@ -308,10 +308,13 @@ def load_dfl_confidential(data_path: str) -> None:
             with open(os.path.join(data_path, match_id, f"{match_id}_processed_dict.pkl"), "rb") as f:
                 total_dict[match_id] = pickle.load(f)
             if total_dict[match_id]['tracking_df'] is None: #'DFL-MAT-J03YIY'
+                print(f"Processed tracking data {match_id} not exists.")
                 continue
         else:
             print(f"Processed data {match_id} not exists.")
         
+        if total_dict[match_id]['tracking_df'] is None:
+            continue
         tracking_df = total_dict[match_id]['tracking_df']
         teams_dict = total_dict[match_id]['teams']
         
@@ -373,6 +376,9 @@ def load_bepro(data_path: str) -> None:
         if os.path.exists(os.path.join(data_path, match_id, f"{match_id}_processed_dict.pkl")):
             with open(os.path.join(data_path, match_id, f"{match_id}_processed_dict.pkl"), "rb") as f:
                 total_dict[match_id] = pickle.load(f)
+            if total_dict[match_id]['tracking_df'] is None:
+                print(f"Processed tracking data {match_id} not exists.")
+                continue
         else:
             print(f"Processed data {match_id} not exists.")
         

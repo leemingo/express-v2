@@ -1,6 +1,3 @@
-# from kloppy import sportec
-# from unravel.soccer import KloppyPolarsDataset
-
 import numpy as np
 import os
 import pandas as pd
@@ -9,77 +6,14 @@ from tqdm import tqdm
 import torch
 from torch.utils.data import Dataset
 import torch.nn.functional as F
-from pressing_intensity import CustomPressingIntensity
+
 from config import *
-import random
-
-coordinates = "secondspectrum"
-num_agents = 23
-num_team_players = 11
 # --- Constants and Configuration ---
-H, W = 68, 104  # Grid dimensions (Height, Width)
-NUM_FEATURE_CHANNELS = 17#13 # Number of input channels for SoccerMap
-PITCH_LENGTH = 105.0
-PITCH_WIDTH = 68.0
-CENTER_X = PITCH_LENGTH / 2 # 52.5
-CENTER_Y = PITCH_WIDTH / 2  # 34.0
+NUM_AGENTS = 23
+NUM_TEAM_PLAYERS = 11
+H, W = 68, 104  # Grid dimensions for SoccerMap (Height, Width)
+NUM_FEATURE_CHANNELS = 17 #13 # Number of input channels for models.
 
-import scipy.signal as signal
-from scipy.ndimage import shift
-def calc_single_agent_velocities(traces: pd.DataFrame, remove_outliers=True, smoothing=True):
-    if remove_outliers:
-        MAX_SPEED = 12
-        MAX_ACCEL = 8
-
-    if smoothing:
-        W_LEN = 9
-        P_ORDER = 2
-
-    x = traces["x"]
-    y = traces["y"]
-
-    if smoothing:
-        x = pd.Series(signal.savgol_filter(x, window_length=21, polyorder=P_ORDER), index=x.index)
-        y = pd.Series(signal.savgol_filter(y, window_length=21, polyorder=P_ORDER), index=y.index)
-
-    fps = 25
-    vx = np.diff(x.values, prepend=x.iloc[0]) / (1 / fps)
-    vy = np.diff(y.values, prepend=y.iloc[0]) / (1 / fps)
-
-    if remove_outliers:
-        speeds = np.sqrt(vx**2 + vy**2)
-        is_speed_outlier = speeds > MAX_SPEED
-        is_accel_outlier = np.abs(np.diff(speeds, append=speeds[-1]) / (1 / fps)) > MAX_ACCEL
-        is_outlier = is_speed_outlier | is_accel_outlier | shift(is_accel_outlier, 1, cval=True)
-        vx = pd.Series(np.where(is_outlier, np.nan, vx)).interpolate(limit_direction="both").values
-        vy = pd.Series(np.where(is_outlier, np.nan, vy)).interpolate(limit_direction="both").values
-
-    if smoothing:
-        vx = signal.savgol_filter(vx, window_length=W_LEN, polyorder=P_ORDER)
-        vy = signal.savgol_filter(vy, window_length=W_LEN, polyorder=P_ORDER)
-
-    speeds = np.sqrt(vx**2 + vy**2)
-
-    ax = np.diff(vx, prepend=vx[0]) / (1 / fps)
-    ay = np.diff(vy, prepend=vy[0]) / (1 / fps)
-    
-    if remove_outliers:
-        accel = np.sqrt(ax**2 + ay**2)
-        is_accel_outlier = accel > MAX_ACCEL
-        is_outlier = is_accel_outlier | shift(is_accel_outlier, 1, cval=True)
-        ax = pd.Series(np.where(is_outlier, np.nan, ax)).interpolate(limit_direction="both").values
-        ay = pd.Series(np.where(is_outlier, np.nan, ay)).interpolate(limit_direction="both").values
-
-    if smoothing:
-        ax = signal.savgol_filter(ax, window_length=W_LEN, polyorder=P_ORDER)
-        ay = signal.savgol_filter(ay, window_length=W_LEN, polyorder=P_ORDER)
-
-    accels = np.sqrt(ax**2 + ay**2)
-
-    feature_cols = ['x', 'y', 'vx', 'vy', 'v', 'ax', 'ay', 'a']
-    traces.loc[x.index, feature_cols] = np.stack([x, y, vx, vy, speeds, ax, ay, accels]).round(6).T
-
-    return traces
 
 class PressingSequenceDataset(Dataset):
     def __init__(self, data_path, match_id_lst=None, sequence_length=150, feature_cols=None):
@@ -169,6 +103,7 @@ class PressingSequenceDataset(Dataset):
         return df_normalized
 
     def _get_event_name(self, x):
+        """Extract event names from event data."""
         event_name_lst = []
         for val in x:
             if "event_name" in val:
@@ -177,27 +112,6 @@ class PressingSequenceDataset(Dataset):
                 event_name_lst.append(val['name'])
         return event_name_lst
 
-    # 각 마지막 frame에 대해, 이후 125/150 frame 내에 ball_owning_team의 값이 변경되었는지 체크하여 label(Y)을 설정
-    def _check_change(row, total_df, window=150):
-        current_period_id = row['period_id']
-        current_frame_id = row['frame_id']
-
-        condition = (
-            (total_df['period_id'] == current_period_id) &
-            (total_df['frame_id'] >= current_frame_id) &
-            (total_df['frame_id'] < current_frame_id + window)
-        )
-        subset = total_df[condition]
-
-        if subset.empty:
-            raise ValueError(
-                f"Subset for period_id {current_period_id}, frame_id {current_frame_id} "
-                f"(looking ahead {window} frames) is empty. "
-                "Cannot determine ball ownership change."
-            )
-            
-        return subset['ball_owning_team_id'].nunique() > 1           
-    
     def _check_pressing_success(self, row, event_df, teams_dict):
         possession_gained_events = ['pass', 'dribble', 'recovery', 'interception',
                                     'cross', 'throw_in', 'take_on', 'shot',
@@ -359,7 +273,6 @@ class PressingSequenceDataset(Dataset):
         return df
        
     def _load_data(self):
-        total_dfs = []
         first_frames_list = []
 
         all_features_seqs = []
@@ -375,8 +288,15 @@ class PressingSequenceDataset(Dataset):
                 
                 print(f"Load match_id : {match_id}")
                 total_dict[match_id] = {}
-                with open(f"{self.data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
-                    match_dict = pickle.load(f)
+                try:
+                    with open(f"{self.data_path}/{match_id}/{match_id}_processed_dict.pkl", "rb") as f:
+                        match_dict = pickle.load(f)
+                except FileNotFoundError:
+                    print(f"Warning: Processed data file not found for match {match_id}. Skipping.")
+                    continue
+                except Exception as e:
+                    print(f"Error loading processed data for match {match_id}: {e}")
+                    continue
 
                 tracking_df = match_dict['tracking_df'].copy()
                 teams_dict = match_dict['teams'].copy()
@@ -385,26 +305,33 @@ class PressingSequenceDataset(Dataset):
                 teams_df = pd.concat([home_team, away_team])
                 meta_data = match_dict['meta_data']
 
-                # Make the direction unified.
-                # 속도, 가속도 계산 오류로 인해 다시 계산
-                tracking_df = tracking_df.drop(columns=["vx", "vy", "ax", "ay", "v", "a"])         
-                tracking_df = tracking_df.groupby(['game_id', 'period_id', 'id']).apply(
-                    calc_single_agent_velocities, include_groups=False
-                ).reset_index(drop=False).drop(columns=['level_3'])
+                
                 tracking_df = tracking_df.sort_values(['game_id', 'period_id', 'frame_id']).reset_index(drop=True)
-
+                # Make the direction unified.
                 tracking_df = self._normalize_coordinate_direction(tracking_df, teams_dict['Home']['tID'].iloc[0])
                 
-                with open(f"{data_path}/{match_id}/{match_id}_presing_intensity.pkl", "rb") as f:
-                    pressing_df = pickle.load(f)
+                try:
+                    with open(f"{self.data_path}/{match_id}/{match_id}_pressing_intensity.pkl", "rb") as f:
+                        pressing_df = pickle.load(f)
+                except FileNotFoundError:
+                    print(f"Warning: Pressing intensity file not found for match {match_id}. Skipping.")
+                    continue
+                except Exception as e:
+                    print(f"Error loading pressing intensity for match {match_id}: {e}")
+                    continue
 
                 # Loading and Preprocessing event data.
-                event_df = pd.read_csv(f"{data_path}/{match_id}/valid_events_filtered2.csv")                
-                event_df = self._preprocess_event_df(event_df, teams_df)
+                try:
+                    event_df = pd.read_csv(f"{self.data_path}/{match_id}/valid_events_filtered2.csv")
+                    event_df = self._preprocess_event_df(event_df, teams_df)
+                except FileNotFoundError:
+                    print(f"Warning: Event file not found for match {match_id}. Skipping.")
+                    continue
+                except Exception as e:
+                    print(f"Error loading event data for match {match_id}: {e}")
+                    continue
                 
                 total_df = self._merge_tracking_pressing_df(tracking_df, pressing_df, teams_df)
-      
-                total_df = pd.merge(tracking_df, pressing_df, on=['game_id', 'period_id', 'timestamp', 'frame_id'], how='left')
                 total_df = total_df[total_df['ball_state'] != 'dead'] # Need to be considered more.
                 total_dict[match_id]['tracking_df'] = total_df
                 total_dict[match_id]['event_df'] = event_df
@@ -418,7 +345,6 @@ class PressingSequenceDataset(Dataset):
                 # "probability_to_intercept"(len(row), len(column)): row(Home선수) - column(어웨이 선수)형태의 matrix로 각 선수가 상대팀 선수에게 가하는 압박 강도
                 pressed_dict = {}
                 ball_carrier_df = total_df[total_df['is_ball_carrier'] == True].copy() # ball carrier가 있는 프레임만 추출: 압박 상황 검출하기 위함(압박 강도, 속도)
-                ball_carrier_df.sort_values('frame_id', inplace=True)
                 for idx, row in tqdm(ball_carrier_df.iterrows(), desc= "Get Pressing Intensity", miniters=len(ball_carrier_df)//10):                    
                     if len(np.where(row['rows'] == row['id'])[0]) != 0: # 홈 팀에 ball carrier가 있는 경우
                         pressed_axis = 'rows'
@@ -605,8 +531,8 @@ class PressingSequenceDataset(Dataset):
                         X_slice_pressing = X_slice_pressing.dropna()
                         pressing_intensity_tensor = torch.tensor(np.stack(X_slice_pressing.map(lambda x: np.stack(x)).values), dtype=torch.float32)
                         _, h, w = pressing_intensity_tensor.shape
-                        pad_h = num_team_players - h
-                        pad_w = num_team_players - w
+                        pad_h = NUM_TEAM_PLAYERS - h
+                        pad_w = NUM_TEAM_PLAYERS - w
                         pressing_intensity_tensor = F.pad(pressing_intensity_tensor, (0, pad_w, 0, pad_h), "constant", 0)
 
                         x_tensor = x_tensor.reshape(-1, num_agents, len(self.feature_cols))
@@ -626,10 +552,19 @@ class PressingSequenceDataset(Dataset):
                         all_agent_orders.append(agents_order)
                         all_match_infos.append(match_info)
                     
+                    except FileNotFoundError as e:
+                        print(f"File not found error in match {match_id}, period {row.get('period_id', 'unknown')}, frame {row.get('frame_id', 'unknown')}: {e}")
+                        continue
+                    except ValueError as e:
+                        print(f"Value error in match {match_id}, period {row.get('period_id', 'unknown')}, frame {row.get('frame_id', 'unknown')}: {e}")
+                        continue
+                    except KeyError as e:
+                        print(f"Key error in match {match_id}, period {row.get('period_id', 'unknown')}, frame {row.get('frame_id', 'unknown')}: {e}")
+                        continue
                     except Exception as e:
-                        period_id = row['period_id']
-                        frame_id = row['frame_id']
-                        print(f"Error | Match ID : {match_id} | Period {period_id} | Frame ID {frame_id} : {e}")
+                        period_id = row.get('period_id', 'unknown')
+                        frame_id = row.get('frame_id', 'unknown')
+                        print(f"Unexpected error in match {match_id}, period {period_id}, frame {frame_id}: {e}")
                         continue
                 self.features_seqs = all_features_seqs
                 
@@ -1035,98 +970,6 @@ class exPressInputDataset(Dataset):
                 'match_info': match_info
             }
 
-# class exPressInputDataset(Dataset):
-#     def __init__(self, pickled_dataset_path, feature_min_vals=None, feature_max_vals=None):
-#         """Loads data from the pickled PressingSequenceDataset object."""
-#         print(f"Loading dataset from {pickled_dataset_path}...")
-#         try:
-#             with open(pickled_dataset_path, "rb") as f:
-#                 # Load the dictionary saved by PressingSequenceDataset
-#                 self.loaded_data = pickle.load(f)
-#         except FileNotFoundError:
-#             print(f"Error: Dataset file not found at {pickled_dataset_path}")
-#         except Exception as e:
-#             print(f"Error loading pickled dataset: {e}")
-
-#         # Normalization
-#         num_features = self.loaded_data[0]['features'].shape[2]
-#         if feature_min_vals is None and feature_max_vals is None:
-#              # Compute min/max across the entire dataset
-#             current_min_vals = torch.full((num_features,), float('inf'), dtype=torch.float32)
-#             current_max_vals = torch.full((num_features,), float('-inf'), dtype=torch.float32)
-        
-#             for idx in range(len(self.loaded_data)):
-#                 features_tensor = self.loaded_data[0]['features']
-#                 min_in_tensor = torch.min(torch.min(features_tensor, dim=0).values, dim=0).values
-#                 max_in_tensor = torch.max(torch.max(features_tensor, dim=0).values, dim=0).values
-
-#                 current_min_vals = torch.minimum(current_min_vals, min_in_tensor)
-#                 current_max_vals = torch.maximum(current_max_vals, max_in_tensor)
-
-#             self.feature_min_vals = current_min_vals
-#             self.feature_max_vals = current_max_vals
-#         else:
-#             self.feature_min_vals = feature_min_vals
-#             self.feature_max_vals = feature_max_vals
-        
-#         # __getitem__에서 브로드캐스팅을 위해 shape 변경: [1, 1, NumFeatures]
-#         self.min_vals = self.feature_min_vals.reshape(1, 1, -1)
-#         self.max_vals = self.feature_max_vals.reshape(1, 1, -1)
-        
-#         self.feature_ranges = self.max_vals - self.min_vals
-#          # Prevent division by zero for constant features
-#         self.feature_ranges[self.feature_ranges == 0] = 1.0 
-
-#     def __len__(self):
-#         """Returns the total number of samples."""
-#         return len(self.loaded_data)
-
-#     def __getitem__(self, idx):
-#         """
-#         Returns a dictionary containing sequence data for the sample at the given index.
-#         Graph construction and transformation happen inside the model.
-#         """
-#         if self.loaded_data is None or idx >= len(self.loaded_data):
-#             raise IndexError("Index out of bounds or data not loaded")
-#         features = self.loaded_data[idx]['features']
-#         # Normalize
-#         features = (features - self.min_vals) / self.feature_ranges
-
-#         pressing_intensity = self.loaded_data[idx]['pressing_intensity']
-#         _, cur_players1, cur_players2 = pressing_intensity.shape
-#         num_team_players = 11
-
-#         if cur_players1 != num_team_players: #11
-#             pad_d1 = num_team_players - cur_players1
-#             # Pad second to last dimension (bottom)
-#             pressing_intensity = F.pad(pressing_intensity, (0, 0, 0, pad_d1), mode='constant', value=0)
-#         if cur_players2 != num_team_players:
-#             pad_d2 = num_team_players - cur_players2
-#             # Pad last dimension (right side)
-#             pressing_intensity = F.pad(pressing_intensity, (0, pad_d2), mode='constant', value=0)
-
-#         #  # --- 'features'에 Min-Max 정규화 적용 ---
-#         # normalized_features = features.float() # 기본값은 원본 (정규화 파라미터가 없는 경우)
-#         # if self.feature_min_vals is not None and self.feature_max_vals is not None:
-#         #     # 정규화: (X - X_min) / (X_max - X_min)
-#         #     # self.feature_ranges가 0인 경우 1.0으로 설정했으므로, 해당 피처는 (X - X_min) / 1.0 = 0 이 됩니다 (X==X_min 가정).
-#         #     normalized_features = (features.float() - self.min_vals_bcast) / (self.feature_ranges + 1e-8) # 1e-8은 매우 작은 범위에 대한 안정성 추가
-#         #     # 값의 범위를 [0, 1]로 클램핑할 수도 있습니다 (정밀도 문제 등으로 약간 벗어날 수 있음).
-#         #     # normalized_features = torch.clamp(normalized_features, 0, 1)
-#         # # --- 정규화 끝 ---
-        
-#         label = self.loaded_data[idx]['label']
-#         presser_id = self.loaded_data[idx]['presser_id']
-#         agent_order = self.loaded_data[idx]['agent_order']
-
-#         return {
-#                 'features': features.float(),         # Shape: [T, A, F] e.g., [125, 23, 8]
-#                 # 'features': normalized_features.float(),         # Shape: [T, A, F] e.g., [125, 23, 8]
-#                 'pressing_intensity': pressing_intensity.float(), # Shape: [T, 11, 11]
-#                 'label': label.float(),             # Shape: [1] or scalar
-#                 'presser_id': presser_id,           # String
-#                 'agent_order': agent_order          # List
-#             }
 
 
 if __name__ == "__main__":
