@@ -1079,6 +1079,7 @@ class BaseDataset(Dataset):
         """Load dataset data from pickle file or create new dataset.
         
         Args:
+            args (argparse.Namespace): Arguments object containing configuration settings.
             pickled_dataset_path (str, optional): Path to pickled dataset file.
             data_path (str, optional): Path to raw data directory.
             match_id_lst (list, optional): List of match IDs.
@@ -1136,10 +1137,11 @@ class SoccerMapInputDataset(BaseDataset):
         transform (ToSoccerMapTensor): Transformer to convert data to spatial maps.
     """
     
-    def __init__(self, pickled_dataset_path=None, data_path=None, match_id_lst=None, num_frames_to_sample=10, feature_cols=None):
+    def __init__(self, args, pickled_dataset_path=None, data_path=None, match_id_lst=None, num_frames_to_sample=10, feature_cols=None):
         """Initialize the SoccerMapInputDataset.
         
         Args:
+            args (argparse.Namespace): Arguments object containing configuration settings.
             pickled_dataset_path (str, optional): Path to pickled dataset file.
                 If provided and exists, loads data from this file. Defaults to None.
             data_path (str, optional): Path to raw data directory. Used if pickled_dataset_path
@@ -1195,7 +1197,7 @@ class exPressInputDataset(BaseDataset):
         feature_ranges (torch.Tensor): Feature ranges for normalization.
     """
     
-    def __init__(self, pickled_dataset_path=None, data_path=None, match_id_lst=None, num_frames_to_sample=10, feature_cols=None):
+    def __init__(self, pickled_dataset_path=None, data_path=None, match_id_lst=None, num_frames_to_sample=10, feature_cols=None, wo_vel=False):
         """Initialize the exPressInputDataset.
         
         Args:
@@ -1209,11 +1211,13 @@ class exPressInputDataset(BaseDataset):
                 Used if pickled_dataset_path is None. Defaults to 10.
             feature_cols (list, optional): Feature columns to use. Used if pickled_dataset_path
                 is None. Defaults to None.
+            wo_vel (bool, optional): Whether to exclude velocity features. Defaults to False.
                 
         Raises:
             ValueError: If neither pickled_dataset_path nor data_path/match_id_lst are provided.
             FileNotFoundError: If pickled dataset file is not found.
         """
+        self.wo_vel = wo_vel
         self._load_dataset_data(pickled_dataset_path, data_path, match_id_lst, num_frames_to_sample, feature_cols)
         
         # Define categorical features (these should not be normalized)
@@ -1375,8 +1379,9 @@ class exPressInputDataset(BaseDataset):
         match_info = self.loaded_data[idx]['match_info']
 
         # Ablation study for checking performance w/o velocity features or w/o event type features
-        # used_feature_ids = [i for i in range(19) if i not in [2, 3, 4, 5, 6, 7, 16, 17]]
-        # features = features[:, :, used_feature_ids]
+        if self.wo_vel:
+            used_feature_ids = [i for i in range(19) if i not in [2, 3, 4, 5, 6, 7, 16, 17]]
+            features = features[:, :, used_feature_ids]
 
         return {
                 'features': features.float(),         # Shape: [T, A, F] e.g., [125, 23, 8]
@@ -1486,22 +1491,25 @@ if __name__ == "__main__":
         # Simple train/val/test split version
         print("Generating simple train/validation/test split datasets...")
         
-        # Check and normalize ratios
-        total_ratio = args.train_ratio + args.valid_ratio + args.test_ratio
-        if abs(total_ratio - 1.0) > 1e-6:
-            print(f"Warning: Ratios sum to {total_ratio}, normalizing to 1.0...")
-            args.train_ratio /= total_ratio
-            args.valid_ratio /= total_ratio
-            args.test_ratio /= total_ratio
+        # # Check and normalize ratios
+        # total_ratio = args.train_ratio + args.valid_ratio + args.test_ratio
+        # if abs(total_ratio - 1.0) > 1e-6:
+        #     print(f"Warning: Ratios sum to {total_ratio}, normalizing to 1.0...")
+        #     args.train_ratio /= total_ratio
+        #     args.valid_ratio /= total_ratio
+        #     args.test_ratio /= total_ratio
         
-        # Split dataset
-        total_matches = len(match_id_lst)
-        train_end = int(total_matches * args.train_ratio)
-        valid_end = train_end + int(total_matches * args.valid_ratio)
+        # # Split dataset
+        # total_matches = len(match_id_lst)
+        # train_end = int(total_matches * args.train_ratio)
+        # valid_end = train_end + int(total_matches * args.valid_ratio)
         
-        train_match_ids = match_id_lst[:train_end]
-        valid_match_ids = match_id_lst[train_end:valid_end]
-        test_match_ids = match_id_lst[valid_end:]
+        # train_match_ids = match_id_lst[:train_end]
+        # valid_match_ids = match_id_lst[train_end:valid_end]
+        # test_match_ids = match_id_lst[valid_end:]
+        train_match_ids = match_id_lst[:30]
+        valid_match_ids = match_id_lst[30:33]
+        test_match_ids = match_id_lst[33:]
         
         print(f"Train: {len(train_match_ids)}, Valid: {len(valid_match_ids)}, Test: {len(test_match_ids)}")
         

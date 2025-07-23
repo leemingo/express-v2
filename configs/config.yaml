@@ -1,0 +1,64 @@
+# Global settings
+seed: 42
+exp_name: "express_experiment"
+mode: "train"
+ckpt_path: null
+model_type: "exPress"
+
+# Data settings
+data:
+  root_path: "path/to/generated/dataset"
+  wo_vel: false
+  batch_size: 32
+  val_split_ratio: 0.2
+  num_workers: 4
+  pin_memory: true
+
+# Trainer settings
+trainer:
+  max_epochs: 200
+  min_epochs: 10
+  gradient_clip_val: 2.0
+  devices: [0]
+  accelerator: "gpu"
+
+# Optimizer settings
+optimizer:
+  optimizer_params:
+    lr: 1e-4
+    weight_decay: 1e-5
+
+# Early stop settings
+early_stop:
+  monitor_metric: "val_loss"
+  patience: 50
+  min_delta: 1e-3
+  mode: "min"
+  strict: false
+  verbose: true
+
+# Checkpoint settings
+checkpoint:
+  monitor_metric: "val_loss"
+  save_top_k: 1
+  verbose: true
+  mode: "min"
+
+# Logging settings
+logging:
+  use_wandb: false
+  wandb:
+    project: "Pressing-Evaluation"
+    entity: null
+    log_model: true
+    save_code: true
+
+# Hydra settings
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    _target_: hydra._internal.core_plugins.basic_launcher.BasicLauncher

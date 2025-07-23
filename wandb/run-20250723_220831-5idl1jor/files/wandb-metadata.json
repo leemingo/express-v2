@@ -1,0 +1,19 @@
+{
+  "os": "Linux-5.15.0-124-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.11.12",
+  "startedAt": "2025-07-23T13:08:32.053549Z",
+  "args": [
+    "data.root_path=/data/MHL/exPressV2/fold_1"
+  ],
+  "program": "/home/work/MHL/express-v2/train.py",
+  "codePath": "train.py",
+  "git": {
+    "remote": "git@git_mhl:leemingo/express-v2.git",
+    "commit": "92c0ec068fddd284a58d870fac9bfeaa2195191f"
+  },
+  "email": "25minseon@gmail.com",
+  "root": "/home/work/MHL/express-v2",
+  "host": "main1",
+  "executable": "/home/work/miniconda/envs/mhl_py311/bin/python",
+  "codePathLocal": "train.py"
+}

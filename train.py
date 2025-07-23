@@ -1,41 +1,69 @@
-import argparse
+import os
+import hydra
+from omegaconf import DictConfig, OmegaConf
+import wandb
+from pytorch_lightning.loggers import WandbLogger
+import pytorch_lightning as pl
 
 # Import from other project files
 from datasets import PressingSequenceDataset, SoccerMapInputDataset
 from components import press
 
-if __name__ == "__main__":
-    # Setup argument parser to accept checkpoint path from command line
-    parser = argparse.ArgumentParser(description="Train a pressing evaluation model.")
-    # parser.add_argument("--model_type", type=str, default="soccermap", choices=['soccermap', 'xgboost', 'exPress'], help="Path to the model checkpoint (.ckpt) file saved during training.")
-    # parser.add_argument("--root_path", type=str, default="/data/MHL/pressing-intensity", help="Path to the data file.")
-    parser.add_argument("--model_type", type=str, default="exPress", choices=['soccermap', 'xgboost', 'exPress'], help="Path to the model checkpoint (.ckpt) file saved during training.")
-    parser.add_argument("--root_path", type=str, help="Path to the data file.")
-    parser.add_argument("--mode", type=str, default="train", choices=['train', 'test'], help="Mode: 'train' or 'test'.")
-    parser.add_argument("--ckpt_path", type=str, default=None, help="Path to checkpoint file (Required for 'test' mode).")
-    parser.add_argument("--params_path", type=str, default="params.json", help="Path to the JSON containing configurations.")
-    parser.add_argument("--seed", type=int, default=42, help="Seed number.")
-    parser.add_argument("--exp_name", type=str, default="grugat_10_frame_0.9_w/ovel", help="Experient name.")
-    
-    args = parser.parse_args()
-    args.root_path = f"/data/MHL/exPressV2/{args.root_path}"
-    print(args.root_path)
-    component_dict = {
-                    "soccermap": press.SoccerMapComponent,
-                    "exPress": press.exPressComponent,
-                }
 
-    exp = component_dict[args.model_type](args)
+@hydra.main(version_base=None, config_path="configs", config_name="config")
+def main(cfg: DictConfig):
+    """Main training function using Hydra configuration."""
     
-    if args.mode == 'train':
+    # Set random seed
+    pl.seed_everything(cfg.seed)
+    
+    # Initialize wandb if enabled
+    if cfg.logging.use_wandb:
+        if cfg.logging.wandb.entity is None:
+            # Try to get entity from environment variable
+            cfg.logging.wandb.entity = os.getenv("WANDB_ENTITY")
+        
+        # Log configuration to wandb
+        wandb.init(
+            project=cfg.logging.wandb.project,
+            entity=cfg.logging.wandb.entity,
+            name=cfg.exp_name,
+            config=OmegaConf.to_container(cfg, resolve=True)
+        )
+        print(f"Initialized Weights & Biases logging for project: {cfg.logging.wandb.project}")
+    else:
+        print("Weights & Biases logging disabled")
+    
+    # Create component based on model type
+    component_dict = {
+        "soccermap": press.SoccerMapComponent,
+        "exPress": press.exPressComponent,
+        "xgboost": press.XGBoostComponent,
+    }
+    
+    if cfg.model_type not in component_dict:
+        raise ValueError(f"Unknown model type: {cfg.model_type}")
+    
+    # Create component with configuration
+    exp = component_dict[cfg.model_type](cfg)
+    
+    # Run training or testing
+    if cfg.mode == 'train':
         exp.train()
         print("\nAttempting to test the best model after training...")
         exp.test(exp.checkpoint_cb.best_model_path)
-    elif args.mode == 'test':
-        if not args.ckpt_path:
-             # In standalone test mode, checkpoint path is mandatory
-             print("Error: --ckpt_path must be provided when running in 'test' mode.")
+    elif cfg.mode == 'test':
+        if not cfg.ckpt_path:
+            print("Error: ckpt_path must be provided when running in 'test' mode.")
         else:
-            exp.test(args.ckpt_path)
+            exp.test(cfg.ckpt_path)
     else:
-        print(f"Error: Unknown mode '{args.mode}'. Choose 'train' or 'test'.")
+        print(f"Error: Unknown mode '{cfg.mode}'. Choose 'train' or 'test'.")
+    
+    # Close wandb if enabled
+    if cfg.logging.use_wandb:
+        wandb.finish()
+
+
+if __name__ == "__main__":
+    main()

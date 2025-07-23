@@ -1,0 +1,3 @@
+- data.root_path=/data/MHL/exPressV2/fold_1
+- data.wo_vel=True
+- model.in_channels=11

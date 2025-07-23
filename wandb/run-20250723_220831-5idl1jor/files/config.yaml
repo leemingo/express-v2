@@ -1,0 +1,100 @@
+_wandb:
+    value:
+        cli_version: 0.20.1
+        m: []
+        python_version: 3.11.12
+        t:
+            "1":
+                - 1
+                - 5
+                - 9
+                - 11
+                - 41
+                - 49
+                - 50
+                - 51
+                - 53
+                - 77
+                - 103
+            "2":
+                - 1
+                - 5
+                - 9
+                - 11
+                - 41
+                - 49
+                - 50
+                - 51
+                - 53
+                - 77
+                - 103
+            "3":
+                - 13
+                - 16
+                - 55
+            "4": 3.11.12
+            "5": 0.20.1
+            "6": 4.53.2
+            "12": 0.20.1
+            "13": linux-x86_64
+ckpt_path:
+    value: null
+data:
+    value:
+        root_path: /data/MHL/exPressV2/fold_1
+        wo_vel: false
+exp_name:
+    value: express_experiment
+logging:
+    value:
+        use_wandb: true
+        wandb:
+            entity: null
+            log_model: true
+            project: exPressV2
+            save_code: true
+mode:
+    value: train
+model:
+    value:
+        checkpoint:
+            mode: min
+            monitor_metric: val_loss
+            save_top_k: 1
+            verbose: true
+        data:
+            batch_size: 32
+            num_workers: 4
+            pin_memory: true
+            val_split_ratio: 0.2
+        early_stop:
+            min_delta: 0.001
+            mode: min
+            monitor_metric: val_loss
+            patience: 50
+            strict: false
+            verbose: true
+        model:
+            gnn_head: 4
+            gnn_hidden_dim: 64
+            in_channels: 19
+            lstm_bidirectional: true
+            lstm_dropout: 0.4
+            lstm_hidden_dim: 64
+            num_gnn_layers: 2
+            num_lstm_layers: 2
+            use_pressing_features: false
+        model_type: exPress
+        optimizer:
+            optimizer_params:
+                lr: 0.0001
+                weight_decay: 1e-05
+        trainer:
+            accelerator: gpu
+            devices:
+                - 0
+            gradient_clip_val: 2
+            max_epochs: 200
+            min_epochs: 10
+seed:
+    value: 42

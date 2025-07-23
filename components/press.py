@@ -15,8 +15,8 @@ from utils_data import custom_temporal_collate
 class SoccerMapComponent(BaseComponent):
     """Handles SoccerMap model training and testing."""
     
-    def __init__(self, args):
-        super().__init__(args)
+    def __init__(self, cfg):
+        super().__init__(cfg)
 
     def _get_common_loader_args(self):
         """Get common DataLoader arguments with custom collate function."""
@@ -41,10 +41,10 @@ class SoccerMapComponent(BaseComponent):
         common_loader_args = self._get_common_loader_args()
         
         if stage == 'fit':
-            train_pkl_path = f"{self.args.root_path}/train_dataset.pkl"
+            train_pkl_path = f"{self.data_cfg.root_path}/train_dataset.pkl"
             
             try:
-                full_train_dataset = SoccerMapInputDataset(train_pkl_path)
+                full_train_dataset = SoccerMapInputDataset(self.data_cfg, train_pkl_path)
             except Exception as e:
                 print(f"Error loading training dataset: {e}")
                 return False
@@ -77,10 +77,10 @@ class SoccerMapComponent(BaseComponent):
             self.val_loader = DataLoader(val_dataset, shuffle=False, **common_loader_args) if val_dataset else None
 
         elif stage == 'test':
-            test_pkl_path = f"{self.args.root_path}/test_dataset.pkl"
+            test_pkl_path = f"{self.data_cfg.root_path}/test_dataset.pkl"
             
             try:
-                test_dataset = SoccerMapInputDataset(test_pkl_path)
+                test_dataset = SoccerMapInputDataset(self.data_cfg, test_pkl_path)
             except Exception as e:
                 print(f"Error loading test dataset: {e}")
                 return False
@@ -99,25 +99,25 @@ class SoccerMapComponent(BaseComponent):
 
     def _setup_model(self):
         """Initializes the Lightning model."""
-        print(f"Initializing model type: {self.args.model_type}")
+        print(f"Initializing model type: {self.cfg.model_type}")
         
-        if self.args.model_type == 'soccermap':
+        if self.cfg.model_type == 'soccermap':
             self.model = PytorchSoccerMapModel(self.model_cfg, self.optimizer_cfg)
-        elif self.args.model_type == 'temporal_soccermap':
+        elif self.cfg.model_type == 'temporal_soccermap':
             self.model = TemporalSoccerMapModel(self.model_cfg, self.optimizer_cfg)
         else:
-            raise ValueError(f"Model type '{self.args.model_type}' setup not implemented.")
+            raise ValueError(f"Model type '{self.cfg.model_type}' setup not implemented.")
 
 
 class XGBoostComponent(BaseComponent):
     """Handles XGBoost model training and testing."""
 
-    def __init__(self, args):
-        super().__init__(args)
+    def __init__(self, cfg):
+        super().__init__(cfg)
 
     def _setup_model(self):
         """Initializes the XGBoost model."""
-        print(f"Initializing model type: {self.args.model_type}")
+        print(f"Initializing model type: {self.cfg.model_type}")
         # TODO: Implement XGBoost model initialization
         raise NotImplementedError("XGBoost model setup not yet implemented.")
 
@@ -125,8 +125,8 @@ class XGBoostComponent(BaseComponent):
 class exPressComponent(BaseComponent):
     """Handles exPress model training and testing."""
 
-    def __init__(self, args):
-        super().__init__(args)
+    def __init__(self, cfg):
+        super().__init__(cfg)
 
     def _get_common_loader_args(self):
         """Get common DataLoader arguments with temporal collate function."""
@@ -141,14 +141,14 @@ class exPressComponent(BaseComponent):
         common_loader_args = self._get_common_loader_args()
 
         # Load datasets
-        train_pkl_path = f"{self.args.root_path}/train_dataset.pkl"
-        valid_pkl_path = f"{self.args.root_path}/valid_dataset.pkl"
-        test_pkl_path = f"{self.args.root_path}/test_dataset.pkl"
+        train_pkl_path = f"{self.data_cfg.root_path}/train_dataset.pkl"
+        valid_pkl_path = f"{self.data_cfg.root_path}/valid_dataset.pkl"
+        test_pkl_path = f"{self.data_cfg.root_path}/test_dataset.pkl"
 
         try:
-            train_dataset = exPressInputDataset(train_pkl_path)
-            val_dataset = exPressInputDataset(valid_pkl_path)
-            test_dataset = exPressInputDataset(test_pkl_path)
+            train_dataset = exPressInputDataset(train_pkl_path, wo_vel=self.data_cfg.wo_vel)
+            val_dataset = exPressInputDataset(valid_pkl_path, wo_vel=self.data_cfg.wo_vel)
+            test_dataset = exPressInputDataset(test_pkl_path, wo_vel=self.data_cfg.wo_vel)
         except Exception as e:
             print(f"Error loading datasets: {e}")
             return False
@@ -180,11 +180,11 @@ class exPressComponent(BaseComponent):
 
     def _setup_model(self):
         """Initializes the Lightning model."""
-        print(f"Initializing model type: {self.args.model_type}")
+        print(f"Initializing model type: {self.cfg.model_type}")
         
-        if self.args.model_type == 'exPress':
+        if self.cfg.model_type == 'exPress':
             self.model = exPressModel(self.model_cfg, self.optimizer_cfg)
         else:
-            raise ValueError(f"Model type '{self.args.model_type}' setup not implemented.")
+            raise ValueError(f"Model type '{self.cfg.model_type}' setup not implemented.")
 
     

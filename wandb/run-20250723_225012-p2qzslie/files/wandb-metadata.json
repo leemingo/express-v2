@@ -1,0 +1,55 @@
+{
+  "os": "Linux-5.15.0-124-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.11.12",
+  "startedAt": "2025-07-23T13:50:12.418974Z",
+  "args": [
+    "--config-name=config_exPress",
+    "data.root_path=/data/MHL/exPressV2/fold_1",
+    "logging.use_wandb=True"
+  ],
+  "program": "/home/work/MHL/express-v2/train.py",
+  "codePath": "train.py",
+  "git": {
+    "remote": "git@git_mhl:leemingo/express-v2.git",
+    "commit": "92c0ec068fddd284a58d870fac9bfeaa2195191f"
+  },
+  "email": "25minseon@gmail.com",
+  "root": "/home/work/MHL/express-v2",
+  "host": "main1",
+  "executable": "/home/work/miniconda/envs/mhl_py311/bin/python",
+  "codePathLocal": "train.py",
+  "cpu_count": 112,
+  "cpu_count_logical": 224,
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "gpu_count": 2,
+  "disk": {
+    "/": {
+      "total": "899564912640",
+      "used": "476893519872"
+    }
+  },
+  "memory": {
+    "total": "2163967963136"
+  },
+  "cpu": {
+    "count": 112,
+    "countLogical": 224
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA H100 80GB HBM3",
+      "memoryTotal": "85520809984",
+      "cudaCores": 16896,
+      "architecture": "Hopper",
+      "uuid": "GPU-48550050-2e2d-48ce-7fd5-3e5154e282a6"
+    },
+    {
+      "name": "NVIDIA H100 80GB HBM3",
+      "memoryTotal": "85520809984",
+      "cudaCores": 16896,
+      "architecture": "Hopper",
+      "uuid": "GPU-f585322c-443e-3b3b-92d2-1f917a46425e"
+    }
+  ],
+  "cudaVersion": "12.4"
+}
