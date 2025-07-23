@@ -18,6 +18,8 @@ if __name__ == "__main__":
     parser.add_argument("--exp_name", type=str, default="grugat_10_frame_0.9_w/ovel", help="Experient name.")
     
     args = parser.parse_args()
+    args.root_path = f"/data/MHL/exPressV2/{args.root_path}"
+    print(args.root_path)
     component_dict = {
                     "soccermap": press.SoccerMapComponent,
                     "exPress": press.exPressComponent,

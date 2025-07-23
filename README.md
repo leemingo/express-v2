@@ -135,12 +135,12 @@ This step includes:
 
 #### Training Mode
 ```bash
-python train.py --model_type exPress --mode train --root_path /data/MHL/pressing-intensity-v2
+python train.py --model_type exPress --mode train --root_path /path/to/dataset
 ```
 
 #### Testing Mode
 ```bash
-python train.py --model_type exPress --mode test --ckpt_path /path/to/checkpoint.ckpt --root_path /data/MHL/pressing-intensity-v2
+python train.py --model_type exPress --mode test --ckpt_path /path/to/checkpoint.ckpt --root_path /path/to/dataset
 ```
 
 #### Available Model Types

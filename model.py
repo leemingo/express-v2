@@ -856,9 +856,9 @@ class LSTMGNN(nn.Module):
 
         # ----- 0) type_name(-1) embedding -----
         numeric_features = x[:, :, :, :-1]  # [B, T_max, A, F_in-1]
-        # categorical_features = x[:, :, :, -1].long()  # [B, T_max, A] (type_name)
-        # categorical_features = self.embed(categorical_features)  # [B, T_max, A, 4]
-        # x = torch.cat([numeric_features, categorical_features], dim=-1)  # [B, T_max, A, F_in-1+4]
+        categorical_features = x[:, :, :, -1].long()  # [B, T_max, A] (type_name)
+        categorical_features = self.embed(categorical_features)  # [B, T_max, A, 4]
+        x = torch.cat([numeric_features, categorical_features], dim=-1)  # [B, T_max, A, F_in-1+4]
         x = numeric_features
         x = self.input_fc(x)  # [B, T_max, A, H_lstm] (F_in-1+4 → H_lstm)
         F_in = self.lstm_hidden_dim  # update F_in to H_lstm

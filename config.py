@@ -13,15 +13,9 @@ PITCH_WIDTH = 68.0
 CENTER_X = PITCH_LENGTH / 2 # 52.5
 CENTER_Y = PITCH_WIDTH / 2  # 34.0
 
-# FEAT_MIN = [-26., -8., -2., -13., 0., -5., -8., 0.]
-# FEAT_MAX = [54., 21., 6., 1., 14., 2., 3., 6.]
-FEAT_MIN = [-52.5, -32., -4., -5., 0., -4., -4., 0., 0., 0., 15., -1., 0., 0., -1., -1., -1., -1.]
-FEAT_MAX = [52.5, 32., 1., 3., 5., 5., 5., 6., 1., 1., 88., 1., 1., 52., 1., 1., 1., 1.]
 
-# [x, y, vx, vy, v, a, ]
-# a: -13 ~ 11
-FEAT_MIN = [-52.5, -32., -12., -12., 0., -8.,-8, 0, 0., 0., 0., -1., -1, 0., -1., -1., -1., -1., 0]
-FEAT_MAX = [52.5, 32., 12., 12., 12., 8, 8, 8, 1., 1., 113., 1., 1., 111., 1., 1., 1., 1., 0]
+FEAT_MIN = [PITCH_X_MIN, PITCH_Y_MIN, -MAX_BALL_SPEED, -MAX_BALL_SPEED, 0., -MAX_BALL_ACCELERATION, -MAX_BALL_ACCELERATION, 0., 0., 0., 0., -1., -1, 0., -1., -1., -1., -1., 0]
+FEAT_MAX = [PITCH_X_MAX, PITCH_Y_MAX, MAX_BALL_SPEED, MAX_BALL_SPEED, MAX_BALL_SPEED, MAX_BALL_ACCELERATION, MAX_BALL_ACCELERATION, MAX_BALL_ACCELERATION, 1., 1., 110., 1., 1., 125., 1., 1., 1., 1., 0]
 
 # FEAT_MIN = [-52.5, -32., -63., -54., 0., -970., -600., 0., 0., 0., 0., -1., -1, 0., -1., -1., -1., -1., 0]
 # FEAT_MAX = [52.5, 32., 83., 153., 28., 1405., 625., 13.5, 1., 1., 113., 1., 1., 111., 1., 1., 1., 1., 0]
