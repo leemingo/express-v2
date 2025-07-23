@@ -135,12 +135,12 @@ This step includes:
 
 #### Training Mode
 ```bash
-python train.py --model_type exPress --mode train --root_path /path/to/dataset
+python train.py --config-name=config_exPress data.root_path=/path/to/dataset
 ```
 
 #### Testing Mode
 ```bash
-python train.py --model_type exPress --mode test --ckpt_path /path/to/checkpoint.ckpt --root_path /path/to/dataset
+python train.py --config-name=config_exPress data.root_path=/path/to/dataset mode=test ckpt_path=/path/to/checkpoint.ckpt
 ```
 
 #### Available Model Types
