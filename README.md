@@ -1,4 +1,4 @@
-# Express-v2: Pressing Evaluation Model
+# exPress-v2: Pressing Evaluation Model
 
 A machine learning project for evaluating pressing intensity in football matches.
 
@@ -51,22 +51,25 @@ The project expects data to be organized in the following structure:
 - **Tracking Data**: `tracking_data.jsonl`
 ```
 
-<!-- ## Installation and Setup -->
+## Installation and Setup
 
-<!-- ### 1. Install Dependencies -->
+### 1. Install PyTorch with CUDA Support
 
-<!-- ```bash
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
+### 2. Install PyTorch Lightning
+
+```bash
+python -m pip install lightning
+```
+
+### 3. Install Project Dependencies
+
+```bash
 pip install -r requirements.txt
-``` -->
-
-<!-- ### 2. Configure Data Path
-
-Set the data path in `config.py`:
-
-```python
-# Data path configuration
-data_path = "/path/to/your/data"
-``` -->
+```
 
 ## Usage
 
@@ -74,19 +77,13 @@ data_path = "/path/to/your/data"
 
 #### BePro Data Preprocessing
 ```bash
-# Use default path
-python preprocess_bepro.py
-
-# Use custom path
+# Set custom path
 python preprocess_bepro.py --data_path /path/to/bepro/raw/data
 ```
 
 #### DFL Data Preprocessing
 ```bash
-# Use default path
-python preprocess_dfl.py
-
-# Use custom path
+# Set custom path
 python preprocess_dfl.py --data_path /path/to/dfl/raw/data
 ```
 
@@ -112,13 +109,13 @@ This step includes:
 
 ```bash
 # BePro data
-python pressing_intensity.py --source bepro
+python pressing_intensity.py --source bepro --data_path /path/to/bepro/processed
 
 # DFL-SPoHo data
-python pressing_intensity.py --source dfl-spoho
+python pressing_intensity.py --source dfl-spoho --data_path /path/to/dfl-spoho/
 
 # DFL confidential data
-python pressing_intensity.py --source dfl-confidential
+python pressing_intensity.py --source dfl-confidential --data_path /path/to/dfl-confidential/
 ```
 
 This step includes:

@@ -30,7 +30,7 @@ optimizer:
 
 # Model settings
 model:
-  in_channels: 13
+  in_channels: 51
 
 # Early stop settings
 early_stop:

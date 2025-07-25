@@ -1,13 +1,12 @@
 # Core ML libraries
-torch>=2.0.0
-torchvision>=0.15.0
-pytorch-lightning>=2.0.0
 torch-geometric>=2.3.0
 torchmetrics>=1.0.0
 
 # Data processing
 numpy>=1.21.0
-pandas>=1.3.0
+pandas>=1.5.3
+polars>=0.14.0
+polars>=21.0.0
 scikit-learn>=1.0.0
 scipy>=1.7.0
 
@@ -21,13 +20,18 @@ omegaconf>=2.3.0
 tqdm>=4.62.0
 matplotlib>=3.5.0
 mplsoccer>=1.1.0
+tensorboard>=2.10.0
 
 # Soccer data processing
 kloppy>=3.0.0
-unravel>=0.1.0
+unravelsports>=1.1.0
 polars>=0.19.0
 
 # Other utilities
 lxml>=4.6.0
 pandera>=0.14.0
-floodlight>=0.1.0 
+floodlight>=0.1.0
+ipython>=8.0.0 
+multimethod<=1.9.0
+transitions>=0.9.3
+xarray>=2023.1.0

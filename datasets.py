@@ -38,7 +38,7 @@ class PressingSequenceDataset(Dataset):
         data (list): List of dictionaries containing all sample data.
     """
     
-    def __init__(self, data_path, match_id_lst=None, num_frames_to_sample=10, feature_cols=None, highpress_only=False):
+    def __init__(self, data_path, match_id_lst=None, num_frames_to_sample=10, feature_cols=None, highpress_only=False, press_threshold=0.9):
         """Initialize the PressingSequenceDataset.
         
         Args:
@@ -60,7 +60,7 @@ class PressingSequenceDataset(Dataset):
         self.feature_cols = feature_cols if feature_cols else self._infer_feature_cols()
         self.cols_to_flip = ['x', 'y', 'vx', 'vy', 'ax', 'ay']
         self.highpress_only = highpress_only
-        
+        self.press_threshold = press_threshold
         self._load_data()
     
     def _infer_feature_cols(self):
@@ -535,7 +535,7 @@ class PressingSequenceDataset(Dataset):
                     pressing_values = [x[id_loc] for x in row['probability_to_intercept']] # If ball carrier is in away team, pressing intensity for home players
                 else:
                     continue
-                if max(pressing_values) > 0.9:
+                if max(pressing_values) > self.press_threshold:
                     pressed_dict[idx] = {}
                     pressed_dict[idx]['pressing_value'] = max(pressing_values)
                     max_idx = pressing_values.index(max(pressing_values))
@@ -913,10 +913,9 @@ class ToSoccerMapTensor:
             x_tensor = torch.cat([pad, x], dim=0)  # shape: (seq_len, N, F)
             
         num_seqs = x_tensor.shape[0]
-  
+        
         matrix = np.zeros((self.num_features * num_seqs, self.y_bins, self.x_bins))
 
-        press_intensity = sample['pressing_intensity']
         target = sample['label']
         presser_id = sample['presser_id']
         agents_order = sample['agent_order']
@@ -1075,7 +1074,7 @@ class BaseDataset(Dataset):
         loaded_data (list): List of sample dictionaries containing all data.
     """
     
-    def _load_dataset_data(self, pickled_dataset_path, data_path, match_id_lst, num_frames_to_sample, feature_cols):
+    def _load_dataset_data(self, pickled_dataset_path, data_path, match_id_lst, num_frames_to_sample, feature_cols, highpress_only=False, press_threshold=0.9):
         """Load dataset data from pickle file or create new dataset.
         
         Args:
@@ -1108,7 +1107,9 @@ class BaseDataset(Dataset):
                     data_path=data_path,
                     match_id_lst=match_id_lst,
                     num_frames_to_sample=num_frames_to_sample,
-                    feature_cols=feature_cols
+                    feature_cols=feature_cols,
+                    highpress_only=highpress_only,
+                    press_threshold=press_threshold
                 )
                 self.loaded_data = temp_dataset.data
                 print(f"Successfully created dataset with {len(self.loaded_data)} samples.")
@@ -1410,6 +1411,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_ratio", type=float, default=0.8, help="Ratio of matches to use for training (when not using CV)")
     parser.add_argument("--valid_ratio", type=float, default=0.1, help="Ratio of matches to use for validation (when not using CV)")
     parser.add_argument("--test_ratio", type=float, default=0.1, help="Ratio of matches to use for testing (when not using CV)")
+    parser.add_argument("--press_threshold", type=float, default=0.9, help="Threshold for pressing intensity")
     
     args = parser.parse_args()
     
@@ -1436,7 +1438,8 @@ if __name__ == "__main__":
             args.data_path, 
             match_id_lst=match_ids, 
             num_frames_to_sample=args.num_frames_to_sample,
-            highpress_only=args.high_only
+            highpress_only=args.high_only,
+            press_threshold=args.press_threshold
         )
         
         with open(f"{save_path}/{dataset_name}.pkl", "wb") as f:
