@@ -145,21 +145,6 @@ python train.py --config-name=config_exPress data.root_path=/path/to/dataset mod
 - `soccermap`: SoccerMap based model
 - `xgboost`: XGBoost based model
 
-## Model Architecture
-
-### exPress Model
-- **Input**: 19-dimensional feature vector (player positions, velocities, accelerations, pressing-related features)
-- **Structure**: 
-  - GNN layers (2 layers)
-  - LSTM layers (2 layers, bidirectional)
-  - Output layer
-- **Output**: Pressing effectiveness score
-
-### Hyperparameter Configuration
-
-You can configure hyperparameters for each model in `params.json`:
-
-
 ## License
 
 This project is developed for research purposes.
