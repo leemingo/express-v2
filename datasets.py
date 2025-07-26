@@ -1431,7 +1431,7 @@ if __name__ == "__main__":
     match_id_lst = [match_id for match_id in match_id_lst if match_id not in args.exclude_matches]
     print(f"Total matches found: {len(match_id_lst)}")
     
-    def create_and_save_dataset(match_ids, save_path, dataset_name):
+    def create_and_save_dataset(args, match_ids, save_path, dataset_name):
         """Helper function to create and save a dataset"""
         print(f"Creating {dataset_name} dataset...")
         dataset = PressingSequenceDataset(
@@ -1473,9 +1473,9 @@ if __name__ == "__main__":
             os.makedirs(fold_save_path, exist_ok=True)
             
             # Create and save datasets
-            create_and_save_dataset(train_match_ids, fold_save_path, "train_dataset")
-            create_and_save_dataset(val_match_ids, fold_save_path, "valid_dataset")
-            create_and_save_dataset(test_match_ids, fold_save_path, "test_dataset")
+            create_and_save_dataset(args, train_match_ids, fold_save_path, f"train_dataset_{args.press_threshold}")
+            create_and_save_dataset(args, val_match_ids, fold_save_path, f"valid_dataset_{args.press_threshold}")
+            create_and_save_dataset(args, test_match_ids, fold_save_path, f"test_dataset_{args.press_threshold}")
             
             # Save fold info
             fold_info = {
@@ -1494,31 +1494,28 @@ if __name__ == "__main__":
         # Simple train/val/test split version
         print("Generating simple train/validation/test split datasets...")
         
-        # # Check and normalize ratios
-        # total_ratio = args.train_ratio + args.valid_ratio + args.test_ratio
-        # if abs(total_ratio - 1.0) > 1e-6:
-        #     print(f"Warning: Ratios sum to {total_ratio}, normalizing to 1.0...")
-        #     args.train_ratio /= total_ratio
-        #     args.valid_ratio /= total_ratio
-        #     args.test_ratio /= total_ratio
+        # Check and normalize ratios
+        total_ratio = args.train_ratio + args.valid_ratio + args.test_ratio
+        if abs(total_ratio - 1.0) > 1e-6:
+            print(f"Warning: Ratios sum to {total_ratio}, normalizing to 1.0...")
+            args.train_ratio /= total_ratio
+            args.valid_ratio /= total_ratio
+            args.test_ratio /= total_ratio
         
-        # # Split dataset
-        # total_matches = len(match_id_lst)
-        # train_end = int(total_matches * args.train_ratio)
-        # valid_end = train_end + int(total_matches * args.valid_ratio)
+        # Split dataset
+        total_matches = len(match_id_lst)
+        train_end = int(total_matches * args.train_ratio)
+        valid_end = train_end + int(total_matches * args.valid_ratio)
         
-        # train_match_ids = match_id_lst[:train_end]
-        # valid_match_ids = match_id_lst[train_end:valid_end]
-        # test_match_ids = match_id_lst[valid_end:]
-        train_match_ids = match_id_lst[:30]
-        valid_match_ids = match_id_lst[30:33]
-        test_match_ids = match_id_lst[33:]
+        train_match_ids = match_id_lst[:train_end]
+        valid_match_ids = match_id_lst[train_end:valid_end]
+        test_match_ids = match_id_lst[valid_end:]
         
         print(f"Train: {len(train_match_ids)}, Valid: {len(valid_match_ids)}, Test: {len(test_match_ids)}")
         
         # Create and save datasets
-        create_and_save_dataset(train_match_ids, args.save_path, "train_dataset")
-        create_and_save_dataset(valid_match_ids, args.save_path, "valid_dataset")
-        create_and_save_dataset(test_match_ids, args.save_path, "test_dataset")
+        create_and_save_dataset(args, train_match_ids, args.save_path, f"train_dataset")
+        create_and_save_dataset(args, valid_match_ids, args.save_path, f"valid_dataset")
+        create_and_save_dataset(args, test_match_ids, args.save_path, f"test_dataset")
         
         print("Dataset generation completed successfully!")
