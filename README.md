@@ -19,6 +19,7 @@ express-v2/
 │   └── ...
 ├── pressing_intensity.py    # Pressing intensity calculation
 ├── train.py                # Model training and testing
+├── test.py                 # Cross-validation testing script
 ├── model.py                # Model architecture
 ├── datasets.py             # Dataset classes
 ├── config.py               # Configuration file
@@ -139,6 +140,26 @@ python train.py --config-name=config_exPress data.root_path=/path/to/dataset
 ```bash
 python train.py --config-name=config_exPress data.root_path=/path/to/dataset mode=test ckpt_path=/path/to/checkpoint.ckpt
 ```
+
+#### Cross-Validation Testing
+```bash
+# Test all CV folds using the test script
+python test.py
+
+# Test with custom configuration
+python test.py data.root_path=/path/to/cv/data num_folds=6
+
+# Test with different output directory
+python test.py output_dir=./my_test_results
+```
+
+The test script (`test.py`) provides the following features:
+- **Cross-validation evaluation**: Tests models from all CV folds automatically
+- **Multiple metrics**: Calculates AUROC, Brier Score, and Log Loss
+- **Dataset analysis**: Provides statistics for each fold (positive/negative samples, match count)
+- **Results saving**: Saves detailed results in JSON format
+- **Error handling**: Gracefully handles missing data or checkpoint files
+- **Configuration management**: Uses Hydra for flexible configuration
 
 #### Available Model Types
 - `exPress`: GNN + LSTM based pressing evaluation model (default)

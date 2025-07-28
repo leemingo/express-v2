@@ -912,7 +912,8 @@ class ToSoccerMapTensor:
             # Pad at the front, then actual frames at the back
             x_tensor = torch.cat([pad, x], dim=0)  # shape: (seq_len, N, F)
             
-        num_seqs = x_tensor.shape[0]
+        # num_seqs = x_tensor.shape[0]
+        num_seqs = 1
         
         matrix = np.zeros((self.num_features * num_seqs, self.y_bins, self.x_bins))
 
@@ -924,8 +925,8 @@ class ToSoccerMapTensor:
         away_team_ids = agents_order[11:22]
 
         for i in range(num_seqs):
-            x_feat = x_tensor[i]
-            # x_feat = x_tensor[-1]
+            # x_feat = x_tensor[i]
+            x_feat = x_tensor[-1]
 
             if presser_id in home_team_ids:
                 pressing_indices = home_indices

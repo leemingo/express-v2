@@ -1,15 +1,19 @@
-# exPress Model Configuration
+# Test Configuration for exPressV2 Model
 seed: 42
-exp_name: "exPress_experiment"
-mode: "train"
+exp_name: "exPress_test"
+mode: "test"
 ckpt_path: null
 model_type: "exPress"
 
+# Test specific settings
+num_folds: 6
+output_dir: "./test_results"
+
 # Data settings
 data:
-  root_path: "path/to/generated/dataset"
+  root_path: "/data/MHL/exPressV2/threshold_0.9/"
   wo_vel: false
-  batch_size: 32
+  batch_size: 1  # Use batch size 1 for testing
   val_split_ratio: 0.2
   num_workers: 4
   pin_memory: true
@@ -36,7 +40,7 @@ model:
   lstm_bidirectional: true
   use_pressing_features: false
   gnn_head: 4
-  pos_weight: None
+  pos_weight: 4.0
 
 early_stop:
   monitor_metric: "val_loss"
@@ -69,4 +73,4 @@ hydra:
     dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}
   launcher:
-    _target_: hydra._internal.core_plugins.basic_launcher.BasicLauncher
+    _target_: hydra._internal.core_plugins.basic_launcher.BasicLauncher 
