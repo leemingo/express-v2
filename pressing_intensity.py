@@ -417,8 +417,8 @@ def load_bepro(data_path: str) -> None:
             orient=orient,
             speed_threshold=2.0,
         )
-        # with open(f"{data_path}/{match_id}/{match_id}_pressing_intensity.pkl", "wb") as f:
-        #     pickle.dump(model.output, f)
+        with open(f"{data_path}/{match_id}/{match_id}_pressing_intensity.pkl", "wb") as f:
+            pickle.dump(model.output, f)
 
 
 
