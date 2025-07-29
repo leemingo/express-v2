@@ -810,8 +810,8 @@ class LSTMGNN(nn.Module):
             embedding_dim=4,  # Embedding dimension
             padding_idx=0  # Padding value is set to 0
         )
-        # self.input_fc = nn.Linear(self.in_channels-1+4, self.lstm_hidden_dim)
-        self.input_fc = nn.Linear(self.in_channels-1, self.lstm_hidden_dim)
+        self.input_fc = nn.Linear(self.in_channels-1+4, self.lstm_hidden_dim)
+        # self.input_fc = nn.Linear(self.in_channels-1, self.lstm_hidden_dim)
 
         # ----- LSTM (per player) -----
         common_kwargs = dict(
@@ -861,7 +861,8 @@ class LSTMGNN(nn.Module):
         categorical_features = x[:, :, :, -1].long()  # [B, T_max, A] (type_name)
         categorical_features = self.embed(categorical_features)  # [B, T_max, A, 4]
         x = torch.cat([numeric_features, categorical_features], dim=-1)  # [B, T_max, A, F_in-1+4]
-        x = numeric_features
+        # W/O embedding
+        # x = numeric_features
         x = self.input_fc(x)  # [B, T_max, A, H_lstm] (F_in-1+4 → H_lstm)
         F_in = self.lstm_hidden_dim  # update F_in to H_lstm
         

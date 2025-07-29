@@ -58,6 +58,7 @@ logging:
   wandb:
     project: "Pressing-Evaluation"
     entity: null
+    api_key: null
     log_model: true
     save_code: true
 
