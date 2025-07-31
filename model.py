@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F  # noqa: N812
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
 from torch_geometric.data import Data, Batch
-from torch_geometric.nn import GATConv, GCNConv, global_mean_pool
+from torch_geometric.nn import GATConv, GCNConv, global_mean_pool, GATv2Conv, GINConv, SAGEConv
 from torch_geometric.utils import dense_to_sparse
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torchmetrics.classification import BinaryAccuracy, BinaryAUROC, BinaryF1Score
@@ -312,8 +312,10 @@ class PytorchSoccerMapModel(pl.LightningModule):
         #self.criterion = nn.BCEWithLogitsLoss()
         #self.criterion = FocalLoss()
 
-        pos_weight_tensor = torch.tensor([4.0]) 
-        self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor) # loss 계산 (sigmoid 내장됨)
+        # pos_weight setting (get from config or use default value)
+        pos_weight = model_config.get('pos_weight', 4.0)
+        pos_weight_tensor = torch.tensor([pos_weight]) 
+        self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor) # loss calculation (sigmoid built-in)
 
         self.optimizer_params = optimizer_params
 
@@ -371,7 +373,7 @@ class PytorchSoccerMapModel(pl.LightningModule):
                 auroc = roc_auc_score(y_true, y_score)
                 self.log("train_auroc", auroc, on_step=False, on_epoch=True, prog_bar=True)
         except Exception as e:
-            # 필요한 경우: 로그 남기기 또는 무시
+            # Log or ignore if needed
             pass
 
         # we can return here dict with any tensors
@@ -388,7 +390,7 @@ class PytorchSoccerMapModel(pl.LightningModule):
         # self.val_accuracy.update(preds, targets.int())
         # self.log("val_acc", self.val_accuracy, on_step=False, on_epoch=True, prog_bar=True)
         # self.val_auroc.update(preds, targets.int())
-        # self.log("val_auroc", self.val_auroc, on_step=False, on_epoch=True, prog_bar=True) # Usually not shown on prog bar
+        # self.log("val_auroc", self.val_auroc, on_step=False, on_epoch=True, prog_bar=False) # Usually not shown on prog bar
 
         preds_label = (preds >= 0.5).int()
         acc = (preds_label == targets.int()).float().mean()
@@ -401,7 +403,7 @@ class PytorchSoccerMapModel(pl.LightningModule):
                 auroc = roc_auc_score(y_true, y_score)
                 self.log("val_auroc", auroc, on_step=False, on_epoch=True, prog_bar=True)
         except Exception as e:
-            # 필요한 경우: 로그 남기기 또는 무시
+            # Log or ignore if needed
             pass
 
         return {"loss": loss, "preds": preds, "targets": targets}
@@ -427,7 +429,7 @@ class PytorchSoccerMapModel(pl.LightningModule):
                 auroc = roc_auc_score(y_true, y_score)
                 self.log("test_auroc", auroc, on_step=False, on_epoch=True, prog_bar=True)
         except Exception as e:
-            # 필요한 경우: 로그 남기기 또는 무시
+            # Log or ignore if needed
             pass
 
         return {"loss": loss, "preds": preds, "targets": targets}
@@ -620,7 +622,7 @@ class PressGNN(nn.Module):
         self.classifier = nn.Linear(self.gnn_hidden_dim, 1)
 
     def forward(self, batch: Dict) -> torch.Tensor:
-        #batch['features'] = batch['features'][:, -1:, ...] # 마지막 프레임만 사용 -> all frame. feat. geonhee
+        #batch['features'] = batch['features'][:, -1:, ...] # use only last frame -> all frame. feat. geonhee
 
         B, T, A, F_in = batch['features'].shape
         device = batch['features'].device
@@ -635,22 +637,22 @@ class PressGNN(nn.Module):
             adj = torch.ones((A, A), device=device) - torch.eye(A, device=device)
             edge_index, edge_weight = dense_to_sparse(adj)
 
-            # 2. 결정된 edge_index를 기반으로 엣지 특징을 계산합니다.
+            # 2. Calculate edge features based on determined edge_index
             source_nodes, dest_nodes = edge_index[0], edge_index[1]
-            # 2-1. 특징: distance_between_nodes
-            # feats의 첫 두 컬럼이 x, y 좌표
+            # 2-1. Feature: distance_between_nodes
+            # First two columns of feats are x, y coordinates
             pos_source = feats[source_nodes, :2]
             pos_dest = feats[dest_nodes, :2]
             edge_distances = torch.linalg.norm(pos_source - pos_dest, dim=1).unsqueeze(1)
 
-            # 2-2. 특징: is_same_team (인덱스 기반으로 계산)
-            # 홈팀: 인덱스 0~10, 원정팀: 인덱스 11~21
+            # 2-2. Feature: is_same_team (calculated based on index)
+            # Home team: index 0~10, Away team: index 11~21
             source_is_home = source_nodes < 11
             dest_is_home = dest_nodes < 11
             source_is_away = (source_nodes >= 11) & (source_nodes < 22)
             dest_is_away = (dest_nodes >= 11) & (dest_nodes < 22)
             
-            # 같은 팀인 경우: (둘 다 홈팀) 또는 (둘 다 원정팀)
+            # Same team case: (both home team) or (both away team)
             is_same = (source_is_home & dest_is_home) | (source_is_away & dest_is_away)
             edge_same_team = is_same.float().unsqueeze(1)
 
@@ -729,26 +731,26 @@ class STLSTMGNN(nn.Module):
             adj = torch.ones((A, A), device=device) - torch.eye(A, device=device)
             edge_index, edge_weight = dense_to_sparse(adj)
 
-            # 2. 결정된 edge_index를 기반으로 엣지 특징을 계산합니다.
+            # 2. Calculate edge features based on determined edge_index
             source_nodes, dest_nodes = edge_index[0], edge_index[1]
-            # 2-1. 특징: distance_between_nodes
-            # feats의 첫 두 컬럼이 x, y 좌표
+            # 2-1. Feature: distance_between_nodes
+            # First two columns of feats are x, y coordinates
             pos_source = feats[source_nodes, :2]
             pos_dest = feats[dest_nodes, :2]
             edge_distances = torch.linalg.norm(pos_source - pos_dest, dim=1).unsqueeze(1)
 
-            # 2-2. 특징: is_same_team (인덱스 기반으로 계산)
-            # 홈팀: 인덱스 0~10, 원정팀: 인덱스 11~21
+            # 2-2. Feature: is_same_team (calculated based on index)
+            # Home team: index 0~10, Away team: index 11~21
             source_is_home = source_nodes < 11
             dest_is_home = dest_nodes < 11
             source_is_away = (source_nodes >= 11) & (source_nodes < 22)
             dest_is_away = (dest_nodes >= 11) & (dest_nodes < 22)
             
-            # 같은 팀인 경우: (둘 다 홈팀) 또는 (둘 다 원정팀)
+            # Same team case: (both home team) or (both away team)
             is_same = (source_is_home & dest_is_home) | (source_is_away & dest_is_away)
             edge_same_team = is_same.float().unsqueeze(1)
 
-            # 거리, 팀여부 2가지 특징 결합
+            # Combine distance and team membership features
             edge_attr = torch.cat([edge_distances, edge_same_team], dim=-1)
 
             data_list.append(Data(x=feats, edge_index=edge_index, edge_attr=edge_attr))    
@@ -769,7 +771,7 @@ class STLSTMGNN(nn.Module):
         # lstm_input = pooled.view(B, T_max, self.gnn_hidden_dim)
         packed_input = pack_padded_sequence(
             lstm_input, 
-            seq_lengths.cpu(), # 길이는 CPU 텐서여야 합니다.
+            seq_lengths.cpu(), # Length must be CPU tensor
             batch_first=True, 
             enforce_sorted=False
         )
@@ -789,6 +791,25 @@ class STLSTMGNN(nn.Module):
 class LSTMGNN(nn.Module):
     """
     Temporal-first (per-player LSTM) + Spatial-second (GNN) architecture.
+    
+    Supports multiple GNN types:
+    - "gat": Graph Attention Network (original)
+    - "gatv2": GATv2 (improved attention mechanism)
+    - "gin": Graph Isomorphism Network
+    - "sage": GraphSAGE
+    
+    Usage:
+        model_config = {
+            'in_channels': 6,
+            'lstm_hidden_dim': 128,
+            'num_lstm_layers': 2,
+            'lstm_dropout': 0.1,
+            'lstm_bidirectional': True,
+            'num_gnn_layers': 3,
+            'gnn_hidden_dim': 64,
+            'gnn_head': 4,
+            'gnn_type': 'gatv2'  # or 'gat', 'gin', 'sage'
+        }
     """
     def __init__(self, model_config: dict):
         super().__init__()
@@ -802,14 +823,15 @@ class LSTMGNN(nn.Module):
         self.num_gnn_layers   = model_config['num_gnn_layers']
         self.gnn_hidden_dim   = model_config['gnn_hidden_dim']
         self.gnn_heads        = model_config['gnn_head']
+        self.gnn_type         = model_config['gnn_type'] # Added gnn_type
 
         self.embed = nn.Embedding(
-            num_embeddings=19+1,  # 전체 임베딩할 항목 수 (패딩 포함)
-            embedding_dim=4,  # 임베딩 차원
-            padding_idx=0  # 패딩값은 0으로 지정
+            num_embeddings=19+1,  # Total number of items to embed (including padding)
+            embedding_dim=4,  # Embedding dimension
+            padding_idx=0  # Padding value is set to 0
         )
-        # self.input_fc = nn.Linear(self.in_channels-1+4, self.lstm_hidden_dim)
-        self.input_fc = nn.Linear(self.in_channels-1, self.lstm_hidden_dim)
+        self.input_fc = nn.Linear(self.in_channels-1+4, self.lstm_hidden_dim)
+        # self.input_fc = nn.Linear(self.in_channels-1, self.lstm_hidden_dim)
 
         # ----- LSTM (per player) -----
         common_kwargs = dict(
@@ -832,13 +854,46 @@ class LSTMGNN(nn.Module):
         self.num_dirs = 2 if self.bidirectional else 1
         in_c = self.lstm_hidden_dim * self.num_dirs
         self.gnn_layers = nn.ModuleList()
+        
+        # GNN type selection with different characteristics:
+        # - GAT/GATv2: Attention-based, can use edge features
+        # - GIN: Graph isomorphism network, good for graph classification
+        # - SAGE: Inductive learning, good for large graphs
         for i in range(self.num_gnn_layers):
             if i < self.num_gnn_layers - 1:
-                self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim,
+                if self.gnn_type == "gat":
+                    # Original Graph Attention Network
+                    self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim,
                                             heads=self.gnn_heads, concat=True))
-                in_c = self.gnn_hidden_dim * self.gnn_heads
+                    in_c = self.gnn_hidden_dim * self.gnn_heads
+                elif self.gnn_type == "gatv2":
+                    # Improved GAT with dynamic attention
+                    self.gnn_layers.append(GATv2Conv(in_c, self.gnn_hidden_dim,
+                                            heads=self.gnn_heads, concat=True,
+                                            add_self_loops=False, edge_dim=1
+                                            ))
+                    in_c = self.gnn_hidden_dim * self.gnn_heads
+                elif self.gnn_type == "gin":
+                    # Graph Isomorphism Network with MLP
+                    self.gnn_layers.append(GINConv(nn.Sequential(nn.Linear(in_c, self.gnn_hidden_dim), nn.ReLU(), nn.Linear(self.gnn_hidden_dim, self.gnn_hidden_dim)), train_eps=True))
+                    in_c = self.gnn_hidden_dim
+                elif self.gnn_type == "sage":
+                    # GraphSAGE for inductive learning
+                    self.gnn_layers.append(SAGEConv(in_c, self.gnn_hidden_dim))
+                    in_c = self.gnn_hidden_dim
+                else:
+                    raise ValueError(f"Unsupported gnn_type: {self.gnn_type}")
             else:
-                self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim, heads=1, concat=False))
+                if self.gnn_type == "gat":
+                    self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim, heads=1, concat=False))
+                elif self.gnn_type == "gatv2":
+                    self.gnn_layers.append(GATv2Conv(in_c, self.gnn_hidden_dim, heads=1, concat=False))
+                elif self.gnn_type == "gin":
+                    self.gnn_layers.append(GINConv(nn.Sequential(nn.Linear(in_c, self.gnn_hidden_dim), nn.ReLU(), nn.Linear(self.gnn_hidden_dim, self.gnn_hidden_dim)), train_eps=True))
+                elif self.gnn_type == "sage":
+                    self.gnn_layers.append(SAGEConv(in_c, self.gnn_hidden_dim))
+                else:
+                    raise ValueError(f"Unsupported gnn_type: {self.gnn_type}")
                 in_c = self.gnn_hidden_dim
 
         # ----- Classifier -----
@@ -859,7 +914,8 @@ class LSTMGNN(nn.Module):
         categorical_features = x[:, :, :, -1].long()  # [B, T_max, A] (type_name)
         categorical_features = self.embed(categorical_features)  # [B, T_max, A, 4]
         x = torch.cat([numeric_features, categorical_features], dim=-1)  # [B, T_max, A, F_in-1+4]
-        x = numeric_features
+        # W/O embedding
+        # x = numeric_features
         x = self.input_fc(x)  # [B, T_max, A, H_lstm] (F_in-1+4 → H_lstm)
         F_in = self.lstm_hidden_dim  # update F_in to H_lstm
         
@@ -867,16 +923,16 @@ class LSTMGNN(nn.Module):
         #   reshape → [B*A, T_max, F_in]
         x_flat = x.permute(0, 2, 1, 3).reshape(B*A, T_max, F_in)
 
-        #   length 벡터: 각 선수 동일 → 반복
+        #   Length vector: same for each player → repeat
         lengths_flat = seq_lens.repeat_interleave(A).cpu()
         packed = pack_padded_sequence(
             x_flat, lengths_flat, batch_first=True, enforce_sorted=False
         )
         rnn_out  = self.rnn(packed)
     
-        # hidden state 꺼내기
+        # Extract hidden state
         if self.rnn_type == "lstm":
-            h_n = rnn_out[1][0]          # (h_n, c_n) 중 h_n
+            h_n = rnn_out[1][0]          # h_n from (h_n, c_n)
         else:  # gru
             h_n = rnn_out[1]             # rnn_out = (output, h_n)
 
@@ -889,31 +945,37 @@ class LSTMGNN(nn.Module):
         # ---------- 2) build graph & run GNN ---------- #
         data_list = []
         for b in range(B):
-            # positional 정보: 마지막 valid frame 기준
+            # Positional information: based on last valid frame
             t_last = seq_lens[b] - 1
             pos = x[b, t_last, :, :2]                   # [A, 2]  (x, y)
 
-            # fully-connected (자유롭게 수정 가능)
+            # Fully-connected (can be modified freely)
             adj = torch.ones(A, A, device=device) - torch.eye(A, device=device)
             edge_index, _ = dense_to_sparse(adj)
 
-            # edge_attr: [distance | same_team]
+            # edge_attr: [distance | same_team] (only for GAT-based models)
             source_nodes, dest_nodes = edge_index[0], edge_index[1]
             
-            same_team = (((source_nodes < 11) & (dest_nodes < 11)) |
-                         ((source_nodes >= 11) & (source_nodes < 22) & (dest_nodes >= 11) & (dest_nodes < 22))
-                        ).float().unsqueeze(1)
-        
-            edge_attr = torch.cat([same_team], dim=1)  # [E, 1]
-
-            data_list.append(
-                Data(x=player_emb[b], edge_index=edge_index, edge_attr=edge_attr)
-            )
+            if self.gnn_type in ["gat", "gatv2"]:
+                same_team = (((source_nodes < 11) & (dest_nodes < 11)) |
+                             ((source_nodes >= 11) & (source_nodes < 22) & (dest_nodes >= 11) & (dest_nodes < 22))
+                            ).float().unsqueeze(1)
+                edge_attr = torch.cat([same_team], dim=1)  # [E, 1]
+                data_list.append(
+                    Data(x=player_emb[b], edge_index=edge_index, edge_attr=edge_attr)
+                )
+            else:
+                data_list.append(
+                    Data(x=player_emb[b], edge_index=edge_index)
+                )
 
         batch_graph = Batch.from_data_list(data_list)
         x_g = batch_graph.x
         for conv in self.gnn_layers:
-            x_g = torch.relu(conv(x_g, batch_graph.edge_index, batch_graph.edge_attr))
+            if self.gnn_type in ["gat"]:
+                x_g = torch.relu(conv(x_g, batch_graph.edge_index, batch_graph.edge_attr))
+            elif self.gnn_type in ["gin", "sage", "gatv2"]:
+                x_g = torch.relu(conv(x_g, batch_graph.edge_index))
 
         # ---------- 3) pooling & head ---------- #
         graph_repr = global_mean_pool(x_g, batch_graph.batch)  # [B, gnn_hidden_dim]
@@ -934,9 +996,14 @@ class exPressModel(pl.LightningModule):
 
         #self.criterion = nn.BCELoss()
         #self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([8.0]))
-        pos_weight_tensor = torch.tensor([4.0]) 
-        self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor) # loss 계산 (sigmoid 내장됨)
-        #self.criterion = nn.BCEWithLogitsLoss()
+        
+        # pos_weight setting (get from config or use default value)
+        pos_weight = model_config.get('pos_weight', None)
+        if pos_weight is not None:
+            pos_weight_tensor = torch.tensor([pos_weight]) 
+            self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor) # loss calculation (sigmoid built-in)
+        else:
+            self.criterion = nn.BCEWithLogitsLoss()
 
         self.optimizer_params = optimizer_params
 
@@ -986,7 +1053,7 @@ class exPressModel(pl.LightningModule):
                 auroc = roc_auc_score(y_true, y_score)
                 self.log("train_auroc", auroc, on_step=False, on_epoch=True, prog_bar=True)
         except Exception as e:
-            # 필요한 경우: 로그 남기기 또는 무시
+            # Log or ignore if needed
             pass
 
         # targets_int = targets.int()
@@ -1015,7 +1082,7 @@ class exPressModel(pl.LightningModule):
                 auroc = roc_auc_score(y_true, y_score)
                 self.log("val_auroc", auroc, on_step=False, on_epoch=True, prog_bar=True)
         except Exception as e:
-            # 필요한 경우: 로그 남기기 또는 무시
+            # Log or ignore if needed
             pass
 
         # targets_int = targets.int()
@@ -1045,7 +1112,7 @@ class exPressModel(pl.LightningModule):
                 auroc = roc_auc_score(y_true, y_score)
                 self.log("test_auroc", auroc, on_step=False, on_epoch=True, prog_bar=True)
         except Exception as e:
-            # 필요한 경우: 로그 남기기 또는 무시
+            # Log or ignore if needed
             pass
 
         # targets_int = targets.int()
@@ -1117,7 +1184,7 @@ class SetTransformer(nn.Module):
         dropout = 0.1
         self.input_fc = nn.Linear(6, dim_hidden)
 
-        # batch_first=False: (Seq, Batch, Feature) -> Spatial Transformer관점에서는 (N, B*W, F)
+        # batch_first=False: (Seq, Batch, Feature) -> From Spatial Transformer perspective: (N, B*W, F)
         #self.player_pos_encoder = PositionalEncoding(dim_hidden)
         self.player_encoder = TransformerEncoder(
             TransformerEncoderLayer(dim_hidden, num_heads, dim_hidden * 2, dropout, activation="gelu"),
@@ -1129,7 +1196,7 @@ class SetTransformer(nn.Module):
             num_layers,
         )
 
-        # batch_first=False: (Seq, Batch, Feature) -> Temporal Transformer관점에서는 (W, B*N, F)
+        # batch_first=False: (Seq, Batch, Feature) -> From Temporal Transformer perspective: (W, B*N, F)
         self.time_pos_encoder = PositionalEncoding(dim_hidden)
         self.time_encoder = TransformerEncoder(
             TransformerEncoderLayer(dim_hidden, num_heads, dim_hidden * 2, dropout, activation="gelu"),
@@ -1141,7 +1208,7 @@ class SetTransformer(nn.Module):
             num_layers,
         )
 
-        self.fc = nn.Sequential( # 속도 예측용
+        self.fc = nn.Sequential( # For velocity prediction
             nn.Linear(23*dim_hidden, 256),
             nn.ReLU(),
             nn.Linear(256, 1)  
@@ -1157,18 +1224,18 @@ class SetTransformer(nn.Module):
 
         X = (
             X.permute(2, 0, 1, 3) # (B, W, N+N', dim_hidden) -> (N+N', B, W, dim_hidden)
-            .contiguous()         # 메모리 연속성 확보
+            .contiguous()         # Ensure memory continuity
             .view(N, B*W, -1)   # (N+N', B, W, dim_hidden) -> (N+N', B*W, dim_hidden)
         )                
         #X = self.player_pos_encoder(X)
         X = self.player_encoder(X)#, src_key_padding_mask=padding_mask)  # (N+N', B*W, dim_hidden)
 
         # Step 4. temporal transformer1
-        X = X[:N, :, :]       # freeze_frame정보는 temporal정보 학습 못함: (N+N', B*W, dim_hidden) -> (N, B*W, dim_hidden)
+        X = X[:N, :, :]       # freeze_frame info cannot learn temporal info: (N+N', B*W, dim_hidden) -> (N, B*W, dim_hidden)
         X = (
             X.view(N, B, W, -1)  # (N, B*W, dim_hidden) -> (N, B, W, dim_hidden)
             .permute(2, 1, 0, 3) # (N, B, W, dim_hidden) -> (W, B, N, dim_hidden)
-            .contiguous()        # 메모리 연속성 확보
+            .contiguous()        # Ensure memory continuity
             .view(W, B*N, -1)    # (W, B, N, dim_hidden) -> (W, B*N, dim_hidden)
         )
         X = self.time_pos_encoder(X)
@@ -1178,23 +1245,23 @@ class SetTransformer(nn.Module):
         X = (
             X.view(W, B, N, -1)  # (W, B*N, dim_hidden) -> (W, B, N, dim_hidden)
             .permute(1, 0, 2, 3) # (W, B, N, dim_hidden) -> (B, W, N, dim_hidden)
-            .contiguous()        # 메모리 연속성 확보
+            .contiguous()        # Ensure memory continuity
         )
         
         X = (
             X.permute(2, 0, 1, 3) # (B, W, N+N', dim_hidden) -> (N+N', B, W, dim_hidden)
-            .contiguous()         # 메모리 연속성 확보
+            .contiguous()         # Ensure memory continuity
             .view(N, B*W, -1)   # (N+N', B, W, dim_hidden) -> (N+N', B*W, dim_hidden)
         )                
         X = self.player_encoder1(X)#, src_key_padding_mask=padding_mask)  # (N, B*W, dim_hidden)
 
         
         # Step 6. temporal transformer2
-        X = X[:N, :, :]       # freeze_frame정보는 temporal정보 학습 못함: (N+N', B*W, dim_hidden) -> (N, B*W, dim_hidden)
+        X = X[:N, :, :]       # freeze_frame info cannot learn temporal info: (N+N', B*W, dim_hidden) -> (N, B*W, dim_hidden)
         X = (
             X.view(N, B, W, -1)  # (N, B*W, dim_hidden) -> (N, B, W, dim_hidden)
             .permute(2, 1, 0, 3) # (N, B, W, dim_hidden) -> (W, B, N, dim_hidden)
-            .contiguous()        # 메모리 연속성 확보
+            .contiguous()        # Ensure memory continuity
             .view(W, B*N, -1)    # (W, B, N, dim_hidden) -> (W, B*N, dim_hidden)
         )
     
@@ -1206,7 +1273,7 @@ class SetTransformer(nn.Module):
         X = (
             X.view(W, B, N, -1)  # (W, B*N, dim_hidden) -> (W, B, N, dim_hidden)
             .permute(1, 0, 2, 3) # (W, B, N, dim_hidden) -> (B, W, N, dim_hidden)
-            .contiguous()        # 메모리 연속성 확보
+            .contiguous()        # Ensure memory continuity
         )[:, -1, :, :]         # (B, N, W, dim_hidden) -> (B, N, dim_hidden)
 
         X = (
@@ -1215,4 +1282,46 @@ class SetTransformer(nn.Module):
         )
         output = self.fc(X)  # (B, N, 2)  ->  (x,y)
 
-        return output  # 최종 예측 좌표 (x, y) or (vx, vy, x, y)
+        return output  # Final predicted coordinates (x, y) or (vx, vy, x, y)
+
+
+# Example usage and testing for different GNN types
+if __name__ == "__main__":
+    # Test different GNN configurations
+    base_config = {
+        'in_channels': 6,
+        'lstm_hidden_dim': 128,
+        'num_lstm_layers': 2,
+        'lstm_dropout': 0.1,
+        'lstm_bidirectional': True,
+        'num_gnn_layers': 3,
+        'gnn_hidden_dim': 64,
+        'gnn_head': 4,
+    }
+    
+    # Test different GNN types
+    gnn_types = ["gat", "gatv2", "gin", "sage"]
+    
+    for gnn_type in gnn_types:
+        print(f"\nTesting {gnn_type.upper()} configuration...")
+        config = base_config.copy()
+        config['gnn_type'] = gnn_type
+        
+        try:
+            model = LSTMGNN(config)
+            print(f"✓ {gnn_type.upper()} model created successfully")
+            
+            # Test with dummy data
+            batch_size, seq_len, num_agents, features = 2, 10, 22, 6
+            dummy_batch = {
+                'features': torch.randn(batch_size, seq_len, num_agents, features),
+                'seq_lengths': torch.tensor([seq_len, seq_len])
+            }
+            
+            output = model(dummy_batch)
+            print(f"✓ {gnn_type.upper()} forward pass successful, output shape: {output.shape}")
+            
+        except Exception as e:
+            print(f"✗ {gnn_type.upper()} failed: {str(e)}")
+    
+    print("\nAll GNN types tested!")

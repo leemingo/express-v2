@@ -28,6 +28,10 @@ optimizer:
     lr: 1e-4
     weight_decay: 1e-5
 
+# Model settings
+model:
+  pos_weight: None
+
 # Early stop settings
 early_stop:
   monitor_metric: "val_loss"
@@ -50,6 +54,7 @@ logging:
   wandb:
     project: "Pressing-Evaluation"
     entity: null
+    api_key: null
     log_model: true
     save_code: true
 

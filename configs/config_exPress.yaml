@@ -35,7 +35,9 @@ model:
   lstm_dropout: 0.4
   lstm_bidirectional: true
   use_pressing_features: false
+  gnn_type: gat # "gat", "gatv2", "gin", "sage"
   gnn_head: 4
+  pos_weight: None
 
 early_stop:
   monitor_metric: "val_loss"
@@ -57,6 +59,7 @@ logging:
   wandb:
     project: "Pressing-Evaluation"
     entity: null
+    api_key: null
     log_model: true
     save_code: true
 
