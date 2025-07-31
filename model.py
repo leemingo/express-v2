@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F  # noqa: N812
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
 from torch_geometric.data import Data, Batch
-from torch_geometric.nn import GATConv, GCNConv, global_mean_pool
+from torch_geometric.nn import GATConv, GCNConv, global_mean_pool, GATv2Conv, GINConv, SAGEConv
 from torch_geometric.utils import dense_to_sparse
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torchmetrics.classification import BinaryAccuracy, BinaryAUROC, BinaryF1Score
@@ -390,7 +390,7 @@ class PytorchSoccerMapModel(pl.LightningModule):
         # self.val_accuracy.update(preds, targets.int())
         # self.log("val_acc", self.val_accuracy, on_step=False, on_epoch=True, prog_bar=True)
         # self.val_auroc.update(preds, targets.int())
-        # self.log("val_auroc", self.val_auroc, on_step=False, on_epoch=True, prog_bar=True) # Usually not shown on prog bar
+        # self.log("val_auroc", self.val_auroc, on_step=False, on_epoch=True, prog_bar=False) # Usually not shown on prog bar
 
         preds_label = (preds >= 0.5).int()
         acc = (preds_label == targets.int()).float().mean()
@@ -791,6 +791,25 @@ class STLSTMGNN(nn.Module):
 class LSTMGNN(nn.Module):
     """
     Temporal-first (per-player LSTM) + Spatial-second (GNN) architecture.
+    
+    Supports multiple GNN types:
+    - "gat": Graph Attention Network (original)
+    - "gatv2": GATv2 (improved attention mechanism)
+    - "gin": Graph Isomorphism Network
+    - "sage": GraphSAGE
+    
+    Usage:
+        model_config = {
+            'in_channels': 6,
+            'lstm_hidden_dim': 128,
+            'num_lstm_layers': 2,
+            'lstm_dropout': 0.1,
+            'lstm_bidirectional': True,
+            'num_gnn_layers': 3,
+            'gnn_hidden_dim': 64,
+            'gnn_head': 4,
+            'gnn_type': 'gatv2'  # or 'gat', 'gin', 'sage'
+        }
     """
     def __init__(self, model_config: dict):
         super().__init__()
@@ -804,6 +823,7 @@ class LSTMGNN(nn.Module):
         self.num_gnn_layers   = model_config['num_gnn_layers']
         self.gnn_hidden_dim   = model_config['gnn_hidden_dim']
         self.gnn_heads        = model_config['gnn_head']
+        self.gnn_type         = model_config['gnn_type'] # Added gnn_type
 
         self.embed = nn.Embedding(
             num_embeddings=19+1,  # Total number of items to embed (including padding)
@@ -834,13 +854,46 @@ class LSTMGNN(nn.Module):
         self.num_dirs = 2 if self.bidirectional else 1
         in_c = self.lstm_hidden_dim * self.num_dirs
         self.gnn_layers = nn.ModuleList()
+        
+        # GNN type selection with different characteristics:
+        # - GAT/GATv2: Attention-based, can use edge features
+        # - GIN: Graph isomorphism network, good for graph classification
+        # - SAGE: Inductive learning, good for large graphs
         for i in range(self.num_gnn_layers):
             if i < self.num_gnn_layers - 1:
-                self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim,
+                if self.gnn_type == "gat":
+                    # Original Graph Attention Network
+                    self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim,
                                             heads=self.gnn_heads, concat=True))
-                in_c = self.gnn_hidden_dim * self.gnn_heads
+                    in_c = self.gnn_hidden_dim * self.gnn_heads
+                elif self.gnn_type == "gatv2":
+                    # Improved GAT with dynamic attention
+                    self.gnn_layers.append(GATv2Conv(in_c, self.gnn_hidden_dim,
+                                            heads=self.gnn_heads, concat=True,
+                                            add_self_loops=False, edge_dim=1
+                                            ))
+                    in_c = self.gnn_hidden_dim * self.gnn_heads
+                elif self.gnn_type == "gin":
+                    # Graph Isomorphism Network with MLP
+                    self.gnn_layers.append(GINConv(nn.Sequential(nn.Linear(in_c, self.gnn_hidden_dim), nn.ReLU(), nn.Linear(self.gnn_hidden_dim, self.gnn_hidden_dim)), train_eps=True))
+                    in_c = self.gnn_hidden_dim
+                elif self.gnn_type == "sage":
+                    # GraphSAGE for inductive learning
+                    self.gnn_layers.append(SAGEConv(in_c, self.gnn_hidden_dim))
+                    in_c = self.gnn_hidden_dim
+                else:
+                    raise ValueError(f"Unsupported gnn_type: {self.gnn_type}")
             else:
-                self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim, heads=1, concat=False))
+                if self.gnn_type == "gat":
+                    self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim, heads=1, concat=False))
+                elif self.gnn_type == "gatv2":
+                    self.gnn_layers.append(GATv2Conv(in_c, self.gnn_hidden_dim, heads=1, concat=False))
+                elif self.gnn_type == "gin":
+                    self.gnn_layers.append(GINConv(nn.Sequential(nn.Linear(in_c, self.gnn_hidden_dim), nn.ReLU(), nn.Linear(self.gnn_hidden_dim, self.gnn_hidden_dim)), train_eps=True))
+                elif self.gnn_type == "sage":
+                    self.gnn_layers.append(SAGEConv(in_c, self.gnn_hidden_dim))
+                else:
+                    raise ValueError(f"Unsupported gnn_type: {self.gnn_type}")
                 in_c = self.gnn_hidden_dim
 
         # ----- Classifier -----
@@ -900,23 +953,29 @@ class LSTMGNN(nn.Module):
             adj = torch.ones(A, A, device=device) - torch.eye(A, device=device)
             edge_index, _ = dense_to_sparse(adj)
 
-            # edge_attr: [distance | same_team]
+            # edge_attr: [distance | same_team] (only for GAT-based models)
             source_nodes, dest_nodes = edge_index[0], edge_index[1]
             
-            same_team = (((source_nodes < 11) & (dest_nodes < 11)) |
-                         ((source_nodes >= 11) & (source_nodes < 22) & (dest_nodes >= 11) & (dest_nodes < 22))
-                        ).float().unsqueeze(1)
-        
-            edge_attr = torch.cat([same_team], dim=1)  # [E, 1]
-
-            data_list.append(
-                Data(x=player_emb[b], edge_index=edge_index, edge_attr=edge_attr)
-            )
+            if self.gnn_type in ["gat", "gatv2"]:
+                same_team = (((source_nodes < 11) & (dest_nodes < 11)) |
+                             ((source_nodes >= 11) & (source_nodes < 22) & (dest_nodes >= 11) & (dest_nodes < 22))
+                            ).float().unsqueeze(1)
+                edge_attr = torch.cat([same_team], dim=1)  # [E, 1]
+                data_list.append(
+                    Data(x=player_emb[b], edge_index=edge_index, edge_attr=edge_attr)
+                )
+            else:
+                data_list.append(
+                    Data(x=player_emb[b], edge_index=edge_index)
+                )
 
         batch_graph = Batch.from_data_list(data_list)
         x_g = batch_graph.x
         for conv in self.gnn_layers:
-            x_g = torch.relu(conv(x_g, batch_graph.edge_index, batch_graph.edge_attr))
+            if self.gnn_type in ["gat"]:
+                x_g = torch.relu(conv(x_g, batch_graph.edge_index, batch_graph.edge_attr))
+            elif self.gnn_type in ["gin", "sage", "gatv2"]:
+                x_g = torch.relu(conv(x_g, batch_graph.edge_index))
 
         # ---------- 3) pooling & head ---------- #
         graph_repr = global_mean_pool(x_g, batch_graph.batch)  # [B, gnn_hidden_dim]
@@ -1224,3 +1283,45 @@ class SetTransformer(nn.Module):
         output = self.fc(X)  # (B, N, 2)  ->  (x,y)
 
         return output  # Final predicted coordinates (x, y) or (vx, vy, x, y)
+
+
+# Example usage and testing for different GNN types
+if __name__ == "__main__":
+    # Test different GNN configurations
+    base_config = {
+        'in_channels': 6,
+        'lstm_hidden_dim': 128,
+        'num_lstm_layers': 2,
+        'lstm_dropout': 0.1,
+        'lstm_bidirectional': True,
+        'num_gnn_layers': 3,
+        'gnn_hidden_dim': 64,
+        'gnn_head': 4,
+    }
+    
+    # Test different GNN types
+    gnn_types = ["gat", "gatv2", "gin", "sage"]
+    
+    for gnn_type in gnn_types:
+        print(f"\nTesting {gnn_type.upper()} configuration...")
+        config = base_config.copy()
+        config['gnn_type'] = gnn_type
+        
+        try:
+            model = LSTMGNN(config)
+            print(f"✓ {gnn_type.upper()} model created successfully")
+            
+            # Test with dummy data
+            batch_size, seq_len, num_agents, features = 2, 10, 22, 6
+            dummy_batch = {
+                'features': torch.randn(batch_size, seq_len, num_agents, features),
+                'seq_lengths': torch.tensor([seq_len, seq_len])
+            }
+            
+            output = model(dummy_batch)
+            print(f"✓ {gnn_type.upper()} forward pass successful, output shape: {output.shape}")
+            
+        except Exception as e:
+            print(f"✗ {gnn_type.upper()} failed: {str(e)}")
+    
+    print("\nAll GNN types tested!")

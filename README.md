@@ -78,13 +78,13 @@ pip install -r requirements.txt
 #### BePro Data Preprocessing
 ```bash
 # Set custom path
-python preprocess_bepro.py --data_path /path/to/bepro/raw/data
+python preprocess/bepro.py --data_path /path/to/bepro/raw/data
 ```
 
 #### DFL Data Preprocessing
 ```bash
 # Set custom path
-python preprocess_dfl.py --data_path /path/to/dfl/raw/data
+python preprocess/dfl.py --data_path /path/to/dfl/raw/data
 ```
 
 This step includes:
