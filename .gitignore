@@ -1,15 +1,19 @@
 *.mp4
+*.tar.gz
 *.csv
 *.gz
-
+*.zip
 # Log files and directories
 logs/
 *.log
-
+*.pkl
 # Compiled Python files and cache
 __pycache__/
 *.pyc
-
+data/
+=*
+*.json
+*.jsonl
 # Output files
 *.out
 

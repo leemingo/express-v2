@@ -7,7 +7,7 @@ from tqdm import tqdm
 import torch
 from torch.utils.data import Dataset
 import torch.nn.functional as F
-
+from features import FEATURE_FUNCTIONS
 from config import *
 # --- Constants and Configuration ---
 NUM_AGENTS = 23
@@ -78,9 +78,14 @@ class PressingSequenceDataset(Dataset):
             'distance_to_goal', 'sin_angle_to_goal', 'cos_angle_to_goal',  # Goal features
             'distance_to_ball', 'sin_angle_to_ball', 'cos_angle_to_ball',  # Ball features
             'cos_velocity_angle', 'sin_velocity_angle',  # Velocity angle features
-            'type_id'  # Event type feature
+            'type_id',  # Event type feature
+            'distance_ball_to_goal','distance_ball_to_sideline', 'distance_ball_to_goalline','actor_speed',
+            'angle_to_center_of_goal','elapsed_time', 'time_diff', 'att_goal_count', 'def_goal_count', 
+            'goal_diff','nb_of_3m_radius','nb_of_5m_radius','nb_of_10m_radius', 'time_diff',
+            'dist_def_to_actor','speed_def_near_actor', 'speed_diff_actor_defender', 'dist_def_near_ball_to_sideline',
+            'dist_def_near_ball_to_goaline','diff_ball_defender_goalline','diff_ball_defender_sideline',
+            'sum_pitch_control'
         ]
-    
     
     def _normalize_coordinate_direction(self, df, home_team_id):
         """Normalize coordinate system to ensure consistent attack direction.
@@ -348,6 +353,131 @@ class PressingSequenceDataset(Dataset):
             return False
         else:
             return False
+    def _get_in_game_feature(self, df):
+        # 1 time_diff 구하기
+        time_diffs = []
+        for _, row in df.iterrows():
+            current_time = row['time_seconds']
+            current_team = row['tID']
+
+            # 상대 팀의 과거 이벤트만 필터링
+            opponent_events = df[
+                (df['tID'] != current_team) &
+                (df['time_seconds'] < current_time)
+            ]
+
+            if not opponent_events.empty:
+                last_opponent_time = opponent_events['time_seconds'].max()
+                time_diff = (current_time - last_opponent_time).total_seconds()
+            else:
+                time_diff = 0.0
+
+            time_diffs.append(time_diff)
+
+        # 계산된 리스트를 새 컬럼으로 추가
+        df['time_diff'] = time_diffs
+
+        # 2. Goal diff 구하기
+
+        # 골 여부 판별
+        df['is_goal'] = (df['type_name'] == "shot") & (df['result_name'] == "Goal")
+
+        # 누적 골 초기화
+        att_goal_count = np.zeros(len(df), dtype=int)
+        def_goal_count = np.zeros(len(df), dtype=int)
+
+        for team in df['tID'].unique():
+            # 공격/수비 여부 판단
+            is_att = df['tID'] == team
+            is_def = ~is_att
+
+            # 공격팀 입장에서 자기가 골 넣은 경우
+            att_goal = df['is_goal'] & is_att
+            att_goal_cumsum = att_goal.cumsum().shift(fill_value=0)
+            att_goal_count[is_att] = att_goal_cumsum[is_att]
+
+            # 공격팀 입장에서 상대가 골 넣은 경우
+            def_goal = df['is_goal'] & is_def
+            def_goal_cumsum = def_goal.cumsum().shift(fill_value=0)
+            def_goal_count[is_att] = def_goal_cumsum[is_att]
+        df['att_goal_count'] = att_goal_count
+        df['def_goal_count'] = def_goal_count
+        df.drop(columns='is_goal', inplace=True)
+        return df
+
+    def _get_frame_interaction_info(self, df):
+        """
+        (통합 헬퍼) 각 프레임에서 아래 두 정보를 모두 찾아 관련 데이터를 반환합니다.
+        1. 볼 캐리어(actor)와 가장 가까운 수비수
+        2. 공(ball)과 가장 가까운 수비수
+        """
+        results_by_frame = {}
+
+        for frame_id, frame_df in df.groupby('frame_id'):
+            ball_carrier = frame_df[frame_df['is_ball_carrier'] == True]
+            ball = frame_df[frame_df['id'] == 'ball']
+
+            if ball_carrier.empty or ball.empty:
+                results_by_frame[frame_id] = { 'dist_def_to_actor': np.nan, 'dist_def_to_ball': np.nan}
+                continue
+
+            actor = ball_carrier.iloc[0]
+            ball_row = ball.iloc[0]
+            
+            actor_pos = np.array([actor['x'], actor['y']])
+            ball_pos = np.array([ball_row['x'], ball_row['y']])
+            
+            defenders = frame_df[(frame_df['team_id'] != actor['team_id']) & (frame_df['id'] != 'ball')]
+
+            if defenders.empty:
+                # 수비수가 없으면 수비수 관련 정보만 NaN으로 설정
+                results_by_frame[frame_id] = { 'dist_def_to_actor': np.nan, 'dist_def_to_ball': np.nan}
+                continue
+
+            defender_positions = defenders[['x', 'y']].values
+
+            # --- 계산 블록 1: 볼 캐리어(actor) 기준 ---
+            dists_to_actor = np.linalg.norm(defender_positions - actor_pos, axis=1)
+            idx_def_near_actor = np.argmin(dists_to_actor)
+            def_near_actor = defenders.iloc[idx_def_near_actor]
+
+            # --- 계산 블록 2: 공(ball) 기준 ---
+            dists_to_ball = np.linalg.norm(defender_positions - ball_pos, axis=1)
+            idx_def_near_ball = np.argmin(dists_to_ball)
+            def_near_ball = defenders.iloc[idx_def_near_ball]
+            distances_to_ball = np.linalg.norm(defenders[['x', 'y']].values - ball_pos, axis=1)
+
+            # --- 모든 정보 취합 ---
+            results_by_frame[frame_id] = {
+                # 볼 캐리어 정보
+                'carrier_speed': np.sqrt(actor['vx']**2 + actor['vy']**2),
+                'carrier_x': actor['x'],
+                'carrier_y': actor['y'],
+                # 공 정보
+                'ball_x': ball_row['x'],
+                'ball_y': ball_row['y'],
+                # '볼 캐리어'와 가장 가까운 수비수 정보
+                'dist_def_to_actor': dists_to_actor[idx_def_near_actor],
+                'speed_def_near_actor': np.sqrt(def_near_actor['vx']**2 + def_near_actor['vy']**2),
+                'x_def_near_actor': def_near_actor['x'],
+                'y_def_near_actor': def_near_actor['y'],
+                # '공'과 가장 가까운 수비수 정보
+                'dist_def_to_ball': dists_to_ball[idx_def_near_ball],
+                'speed_def_near_ball': np.sqrt(def_near_ball['vx']**2 + def_near_ball['vy']**2),
+                'x_def_near_ball': def_near_ball['x'],
+                'y_def_near_ball': def_near_ball['y'],
+                'nb_of_3m_radius' : np.sum(distances_to_ball <= 3.0),
+                'nb_of_5m_radius': np.sum(distances_to_ball <= 5.0),
+                'nb_of_10m_radius': np.sum(distances_to_ball <= 10.0)
+            }
+
+            features_df = pd.DataFrame.from_dict(results_by_frame, orient='index')
+            features_df.index.name = 'frame_id'
+            features_df.reset_index(inplace=True)
+
+            # 2. X_slice에 merge
+            merged_df = pd.merge(df, features_df, on='frame_id', how='left')
+        return merged_df
 
     def _generate_features(self, frame_df: pd.DataFrame) -> pd.DataFrame:
         """Generate additional features from tracking data for a single frame.
@@ -452,6 +582,7 @@ class PressingSequenceDataset(Dataset):
         all_presser_ids = []
         all_agent_orders = []
         all_match_infos = []
+
         if not os.path.exists(self.data_path):
             raise FileNotFoundError(f"Data path {self.data_path} does not exist")
             
@@ -498,6 +629,7 @@ class PressingSequenceDataset(Dataset):
             try:
                 event_df = pd.read_csv(f"{self.data_path}/{match_id}/valid_events_filtered2.csv")
                 event_df = self._preprocess_event_df(event_df, teams_df)
+                event_df = self._get_in_game_feature(event_df)
             except FileNotFoundError:
                 print(f"Warning: Event file not found for match {match_id}. Skipping.")
                 continue
@@ -604,7 +736,6 @@ class PressingSequenceDataset(Dataset):
                         (event_period_df['time_seconds'] >= timestamp - pd.Timedelta(seconds=5)) &
                         (event_period_df['time_seconds'] <= timestamp)
                     ]
-
                     # Tracking data within 5 seconds before pressing started
                     trace_period_df = tracking_by_period.get(period_id)
                     window_trace_df = trace_period_df[
@@ -635,6 +766,7 @@ class PressingSequenceDataset(Dataset):
                     final_timestamps.sort()
                     X_slice = window_trace_df[window_trace_df['timestamp'].isin(final_timestamps)].copy()
 
+                    # X_slice = total_df[total_df['timestamp'] == timestamp].copy()#single frame
                     # Always press left -> right
                     # If pressed player's team is home, flip: if carrier is in home team, mirror left-right (pressing team always attacks left to right)
                     if X_slice.loc[(X_slice['frame_id']==frame_id) & (X_slice['is_ball_carrier']==True)]['team_id'].iloc[0] == match_dict['teams']['Home']['tID'].iloc[0]:
@@ -645,11 +777,23 @@ class PressingSequenceDataset(Dataset):
                     # Generate kinematic features and event features per frame/agent
                     window_event_df = window_event_df.copy()
                     window_event_df["type_id"] += 1
-                    X_slice = pd.merge_asof(X_slice, window_event_df[["time_seconds", "type_id"]], left_on="timestamp", right_on="time_seconds", direction="forward")
+                    X_slice = pd.merge_asof(X_slice, window_event_df[["time_seconds", "type_id", "time_diff", "att_goal_count", "def_goal_count"]],
+                                             left_on="timestamp",
+                                             right_on="time_seconds",
+                                            direction="backward")
+                    event_cols_to_fill = ["type_id", "time_diff", "att_goal_count", "def_goal_count"]
+                    # ffill()로 가장 최근 이벤트 정보를 앞으로 채우고, 그래도 남은 NaN은 0으로 채웁니다.
+                    for col in event_cols_to_fill:
+                        if col in X_slice.columns:
+                            X_slice[col] = X_slice[col].ffill().fillna(0)
+
                     X_slice["type_id"] = X_slice["type_id"].ffill().fillna(0).astype(int)
                     X_slice = X_slice.set_index('frame_id').groupby('frame_id', group_keys=False).apply(self._generate_features)
-                    
+                    X_slice = self._get_frame_interaction_info(X_slice)
                     X_slice.reset_index(inplace=True)
+                    for feature_func in FEATURE_FUNCTIONS:                        
+                        X_slice = feature_func(X_slice)
+                    
 
                     # Fill players if there are less than 22 players in the frame
                     agents_rows = X_slice[(X_slice['frame_id']==frame_id) & (X_slice['is_ball_carrier']==True)]['rows'].values[0].tolist() # Home team
@@ -694,8 +838,13 @@ class PressingSequenceDataset(Dataset):
 
                     # Sort the players by their ID to maintain a consistent order
                     X_slice = X_slice.sort_values(by=['frame_id', 'id'])
-            
+                    # nan_columns = X_slice.columns[X_slice.isnull().any()].tolist()
+                    # if nan_columns:
+                    #     print(f"NaNs found in columns: {nan_columns}")
+                    #     # 어떤 행에서 NaN이 발생하는지 확인하고 싶을 때 아래 코드 활성화
+                    #     print(X_slice[X_slice[nan_columns[0]].isnull()])
                     # Get the features
+                    
                     x_tensor = torch.tensor(X_slice[self.feature_cols].values, dtype=torch.float32)
 
                     X_slice_pressing = X_slice[X_slice['is_ball_carrier']==True]['probability_to_intercept']
@@ -1453,6 +1602,8 @@ if __name__ == "__main__":
         kf = KFold(n_splits=args.n_folds, shuffle=True, random_state=42)
         
         for fold_idx, (train_val_indices, test_indices) in enumerate(kf.split(match_id_lst)):
+            if fold_idx != 1:
+                continue
             print(f"\n=== Fold {fold_idx + 1}/{args.n_folds} ===")
             
             # Split train_val into train and validation
