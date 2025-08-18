@@ -539,6 +539,7 @@ def load_all_data(data_path: str) -> None:
     processed_path = os.path.join(os.path.dirname(data_path), "processed")
     
     for match_id in match_id_lst:
+        if match_id not in ["153390", "126285", "126293", "126298"]: continue
         print(f"Preprocessing Match ID {match_id}: Converting data into kloppy format...")
         match_path = f"{data_path}/{match_id}"
         

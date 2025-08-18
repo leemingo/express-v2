@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, brier_score_loss, log_loss, precision_score, recall_score, f1_score
 
 import torch
 import torch.nn as nn
@@ -410,42 +410,32 @@ class PytorchSoccerMapModel(pl.LightningModule):
 
     def test_step(self, batch: Any, batch_idx: int):
         loss, preds, targets = self.step(batch)
-        # log test metrics
-        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-        # --- Update and Log Test Accuracy ---
-        # self.test_accuracy.update(preds, targets.int())
-        # self.log("test_acc", self.test_accuracy, on_step=False, on_epoch=True, logger=True)
-        # self.test_auroc.update(preds, targets.int())
-        # self.log("test_auroc", self.test_auroc, on_step=False, on_epoch=True, logger=True)
 
+        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         preds_label = (preds >= 0.5).int()
         acc = (preds_label == targets.int()).float().mean()
         self.log("test_acc", acc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
-        try:
-            y_true = targets.detach().cpu().numpy()
-            y_score = preds.detach().cpu().numpy()
-            if len(np.unique(y_true)) > 1:
-                auroc = roc_auc_score(y_true, y_score)
-                self.log("test_auroc", auroc, on_step=False, on_epoch=True, prog_bar=True)
-        except Exception as e:
-            # Log or ignore if needed
-            pass
+        # Calculate additional metrics using helper method
+        y_true = targets.detach().cpu().numpy()
+        y_score = preds.detach().cpu().numpy()
+        preds_label_np = preds_label.cpu().numpy()
+        
+        metrics = self._calculate_metrics(y_true, y_score, preds_label_np, prefix="test")
 
-        return {"loss": loss, "preds": preds, "targets": targets}
+        return loss
 
     def predict_step(self, batch: Any, batch_idx: int):
 
-        x, y = batch
         
         # x = x.to("cuda")
         # y = y.to("cuda")
         # x, mask, y = batch
     
-        preds = self(x)  # self.forward(x)
+        preds = self(batch)  # self.forward(x)
         preds = torch.sigmoid(preds)  # Apply sigmoid to get probabilities
-        return preds, y
-
+        return preds, batch["label"]
+    
     def configure_optimizers(self):
         """Choose what optimizers and learning-rate schedulers to use in your optimization.
 
@@ -674,120 +664,6 @@ class PressGNN(nn.Module):
         return logits
 
 
-class STLSTMGNN(nn.Module):
-    def __init__(self,
-                model_config : dict,
-                 ): # Flag to use pressing intensity
-        super().__init__()
-        self.feature_dim = model_config['in_channels']
-        self.num_gnn_layers = model_config['num_gnn_layers']
-        self.gnn_hidden_dim = model_config['gnn_hidden_dim']
-        self.num_lstm_layers = model_config['num_lstm_layers']
-        self.lstm_hidden_dim = model_config['lstm_hidden_dim']
-        self.lstm_dropout = model_config['lstm_dropout']
-        self.lstm_bidirectional = model_config['lstm_bidirectional']
-        self.use_pressing_features = model_config['use_pressing_features']
-        self.gnn_heads = model_config['gnn_head']
-        
-        # GNN Layers (using edge_weight for pressure)
-        self.gnn_layers = nn.ModuleList()
-        in_c = self.feature_dim
-        # self.gnn_layers.append(GCNConv(self.feature_dim, self.gnn_hidden_dim)) # GCNConv can use edge_weight
-        for i in range(self.num_gnn_layers):
-            if i < self.num_gnn_layers - 1:
-                self.gnn_layers.append(
-                    GATConv(in_c, self.gnn_hidden_dim, heads=self.gnn_heads, concat=True)
-                )
-                in_c = self.gnn_hidden_dim * self.gnn_heads
-            else:
-                self.gnn_layers.append(GATConv(in_c, self.gnn_hidden_dim, heads=1, concat=False)) # GCNConv can use edge_weight
-                in_c = self.gnn_hidden_dim
-
-        # LSTM Layer
-        self.num_directions = 2 if self.lstm_bidirectional else 1
-        self.lstm = nn.LSTM(
-            input_size=self.gnn_hidden_dim,
-            hidden_size=self.lstm_hidden_dim, num_layers=self.num_lstm_layers, batch_first=True,
-            dropout=self.lstm_dropout if self.num_lstm_layers > 1 else 0, bidirectional=self.lstm_bidirectional)
-
-        
-        # Classifier Head
-        self.classifier = nn.Linear(self.lstm_hidden_dim * self.num_directions, 1)
-
-    def forward(self, batch: Dict) -> torch.Tensor:
-        features, seq_lengths = batch['features'], batch['seq_lengths']
-        B, T_max, A, F_in = batch['features'].shape
-        device = features.device
-        mask = torch.arange(T_max, device=device).expand(B, T_max) < seq_lengths.unsqueeze(1)
-        valid_frames = features[mask]  # Shape: [num_valid_frames, A, F_in]
-        num_valid_frames = valid_frames.shape[0]
-        
-        # x_frames = batch['features'].reshape(B*T, A, F_in) # [B, A, T, F_in]
-        
-        data_list = []
-        for i in range(num_valid_frames):
-            feats = valid_frames[i]  # [A, temporal_hidden_dim]
-            # feats = x_frames[i]  # [A, temporal_hidden_dim]
-            adj = torch.ones((A, A), device=device) - torch.eye(A, device=device)
-            edge_index, edge_weight = dense_to_sparse(adj)
-
-            # 2. Calculate edge features based on determined edge_index
-            source_nodes, dest_nodes = edge_index[0], edge_index[1]
-            # 2-1. Feature: distance_between_nodes
-            # First two columns of feats are x, y coordinates
-            pos_source = feats[source_nodes, :2]
-            pos_dest = feats[dest_nodes, :2]
-            edge_distances = torch.linalg.norm(pos_source - pos_dest, dim=1).unsqueeze(1)
-
-            # 2-2. Feature: is_same_team (calculated based on index)
-            # Home team: index 0~10, Away team: index 11~21
-            source_is_home = source_nodes < 11
-            dest_is_home = dest_nodes < 11
-            source_is_away = (source_nodes >= 11) & (source_nodes < 22)
-            dest_is_away = (dest_nodes >= 11) & (dest_nodes < 22)
-            
-            # Same team case: (both home team) or (both away team)
-            is_same = (source_is_home & dest_is_home) | (source_is_away & dest_is_away)
-            edge_same_team = is_same.float().unsqueeze(1)
-
-            # Combine distance and team membership features
-            edge_attr = torch.cat([edge_distances, edge_same_team], dim=-1)
-
-            data_list.append(Data(x=feats, edge_index=edge_index, edge_attr=edge_attr))    
-
-        batch_graph = Batch.from_data_list(data_list)
-        # Spatial GNN: apply each layer
-        x = batch_graph.x
-        for conv in self.gnn_layers:
-            x = conv(x, batch_graph.edge_index, batch_graph.edge_attr)
-            x = torch.relu(x)
-        
-        # Global Pooling
-        pooled = global_mean_pool(x, batch_graph.batch)     # [B, gnn_hidden_dim]
-        
-        # Temporal encoder
-        lstm_input = torch.zeros(B, T_max, self.gnn_hidden_dim, device=device)
-        lstm_input[mask] = pooled
-        # lstm_input = pooled.view(B, T_max, self.gnn_hidden_dim)
-        packed_input = pack_padded_sequence(
-            lstm_input, 
-            seq_lengths.cpu(), # Length must be CPU tensor
-            batch_first=True, 
-            enforce_sorted=False
-        )
-        lstm_out, (h_n, _) = self.lstm(packed_input)  # h_n: [1, B*A, hidden]
-        # lstm_out, (h_n, _) = self.lstm(x_frames)  # h_n: [1, B*A, hidden]
-        if self.lstm_bidirectional:
-            h_fwd = h_n[-2, :, :]
-            h_bwd = h_n[-1, :, :]
-            final_hidden = torch.cat([h_fwd, h_bwd], dim=1)  # [B*N, 2H]
-        else:
-            final_hidden = h_n[-1, :, :]
-        
-        logits = self.classifier(final_hidden).squeeze(-1)  # [B]
-        return logits
-
-
 class LSTMGNN(nn.Module):
     """
     Temporal-first (per-player LSTM) + Spatial-second (GNN) architecture.
@@ -973,7 +849,8 @@ class LSTMGNN(nn.Module):
         x_g = batch_graph.x
         for conv in self.gnn_layers:
             if self.gnn_type in ["gat"]:
-                x_g = torch.relu(conv(x_g, batch_graph.edge_index, batch_graph.edge_attr))
+                # x_g = torch.relu(conv(x_g, batch_graph.edge_index, batch_graph.edge_attr))
+                x_g = F.elu(conv(x_g, batch_graph.edge_index, batch_graph.edge_attr))
             elif self.gnn_type in ["gin", "sage", "gatv2"]:
                 x_g = torch.relu(conv(x_g, batch_graph.edge_index))
 
@@ -988,7 +865,6 @@ class exPressModel(pl.LightningModule):
         self.save_hyperparameters()
 
         # Instantiate the new GNN+LSTM model
-        #self.model = STLSTMGNN(model_config=model_config) # Multi frame
         #self.model = SetTransformer(model_config=model_config) # Multi frame
         self.model = LSTMGNN(model_config=model_config) # Multi frame
         #self.model = PressGNN(model_config=model_config) # Only one frame
@@ -1007,14 +883,6 @@ class exPressModel(pl.LightningModule):
 
         self.optimizer_params = optimizer_params
 
-        # self.train_accuracy = BinaryAccuracy()
-        # self.val_accuracy = BinaryAccuracy()
-        # self.test_accuracy = BinaryAccuracy()
-        # self.train_auroc = BinaryAUROC()
-        # self.val_auroc = BinaryAUROC()
-        # self.test_auroc = BinaryAUROC()
-        # self.test_f1_score = BinaryF1Score(threshold=0.25)
-        
     def forward(self, batch: dict) -> torch.Tensor:
         # Pass the whole batch dictionary to the model's forward
         x = self.model(batch)
@@ -1036,6 +904,43 @@ class exPressModel(pl.LightningModule):
         preds_prob = torch.sigmoid(logits)
         return loss, preds_prob, y
     
+    def _calculate_metrics(self, y_true, y_score, preds_label, prefix="test"):
+        """Calculate various metrics for evaluation."""
+        try:
+            if len(np.unique(y_true)) > 1:
+                # AUROC Score
+                auroc = roc_auc_score(y_true, y_score)
+                self.log(f"{prefix}_auroc", auroc, on_step=False, on_epoch=True, prog_bar=True)
+                
+                # Brier Score (낮을수록 좋음)
+                brier_score = brier_score_loss(y_true, y_score)
+                self.log(f"{prefix}_brier", brier_score, on_step=False, on_epoch=True, prog_bar=True)
+                
+                # Log Loss (낮을수록 좋음)
+                logloss_score = log_loss(y_true, y_score)
+                self.log(f"{prefix}_logloss", logloss_score, on_step=False, on_epoch=True, prog_bar=True)
+                
+                # Additional metrics
+                precision = precision_score(y_true, preds_label, zero_division=0)
+                recall = recall_score(y_true, preds_label, zero_division=0)
+                f1 = f1_score(y_true, preds_label, zero_division=0)
+                
+                self.log(f"{prefix}_precision", precision, on_step=False, on_epoch=True, prog_bar=False)
+                self.log(f"{prefix}_recall", recall, on_step=False, on_epoch=True, prog_bar=False)
+                self.log(f"{prefix}_f1", f1, on_step=False, on_epoch=True, prog_bar=False)
+                
+                return {
+                    'auroc': auroc,
+                    'brier_score': brier_score,
+                    'log_loss': logloss_score,
+                    'precision': precision,
+                    'recall': recall,
+                    'f1': f1
+                }
+        except Exception as e:
+            print(f"Warning: Error calculating metrics in {prefix}_step: {e}")
+            return None
+
     # training_step, validation_step, test_step remain structurally the same:
     # call self.step, update/log metrics (using the metric objects)
     def training_step(self, batch: dict, batch_idx: int) -> torch.Tensor:
@@ -1046,24 +951,12 @@ class exPressModel(pl.LightningModule):
         acc = (preds_label == targets.int()).float().mean()
         self.log("train_acc", acc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
-        try:
-            y_true = targets.detach().cpu().numpy()
-            y_score = preds.detach().cpu().numpy()
-            if len(np.unique(y_true)) > 1:
-                auroc = roc_auc_score(y_true, y_score)
-                self.log("train_auroc", auroc, on_step=False, on_epoch=True, prog_bar=True)
-        except Exception as e:
-            # Log or ignore if needed
-            pass
-
-        # targets_int = targets.int()
-        # self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        # self.train_accuracy.update(preds, targets_int); self.log("train_acc", self.train_accuracy, on_step=False, on_epoch=True, prog_bar=True)
-
-        # try: 
-        #     self.train_auroc.update(preds, targets_int); self.log("train_auroc", self.train_auroc, on_step=False, on_epoch=True, prog_bar=True)
-        # except ValueError: 
-        #     pass
+        # Calculate additional metrics using helper method
+        y_true = targets.detach().cpu().numpy()
+        y_score = preds.detach().cpu().numpy()
+        preds_label_np = preds_label.cpu().numpy()
+        
+        metrics = self._calculate_metrics(y_true, y_score, preds_label_np, prefix="train")
 
         return loss
 
@@ -1075,26 +968,13 @@ class exPressModel(pl.LightningModule):
         acc = (preds_label == targets.int()).float().mean()
         self.log("val_acc", acc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
-        try:
-            y_true = targets.detach().cpu().numpy()
-            y_score = preds.detach().cpu().numpy()
-            if len(np.unique(y_true)) > 1:
-                auroc = roc_auc_score(y_true, y_score)
-                self.log("val_auroc", auroc, on_step=False, on_epoch=True, prog_bar=True)
-        except Exception as e:
-            # Log or ignore if needed
-            pass
+        # Calculate additional metrics using helper method
+        y_true = targets.detach().cpu().numpy()
+        y_score = preds.detach().cpu().numpy()
+        preds_label_np = preds_label.cpu().numpy()
+        
+        metrics = self._calculate_metrics(y_true, y_score, preds_label_np, prefix="val")
 
-        # targets_int = targets.int()
-        # self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-
-        # self.val_accuracy.update(preds, targets_int); self.log("val_acc", self.val_accuracy, on_step=False, on_epoch=True, prog_bar=True)
-        # try: 
-        #     self.val_auroc.update(preds, targets_int); self.log("val_auroc", self.val_auroc, on_step=False, on_epoch=True, prog_bar=True)
-        # except ValueError: 
-        #     pass
-
-        # return {"val_loss": loss}
         return loss
 
     def test_step(self, batch: dict, batch_idx: int) -> Optional[Dict]:
@@ -1105,38 +985,16 @@ class exPressModel(pl.LightningModule):
         acc = (preds_label == targets.int()).float().mean()
         self.log("test_acc", acc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
-        try:
-            y_true = targets.detach().cpu().numpy()
-            y_score = preds.detach().cpu().numpy()
-            if len(np.unique(y_true)) > 1:
-                auroc = roc_auc_score(y_true, y_score)
-                self.log("test_auroc", auroc, on_step=False, on_epoch=True, prog_bar=True)
-        except Exception as e:
-            # Log or ignore if needed
-            pass
+        # Calculate additional metrics using helper method
+        y_true = targets.detach().cpu().numpy()
+        y_score = preds.detach().cpu().numpy()
+        preds_label_np = preds_label.cpu().numpy()
+        
+        metrics = self._calculate_metrics(y_true, y_score, preds_label_np, prefix="test")
 
-        # targets_int = targets.int()
-        # self.log("test_loss", loss, on_step=False, on_epoch=True, logger=True, sync_dist=True)
-
-        # self.test_accuracy.update(preds, targets_int); self.log("test_acc", self.test_accuracy, on_step=False, on_epoch=True, logger=True)
-        # try: 
-        #     self.test_auroc.update(preds, targets_int); self.log("test_auroc", self.test_auroc, on_step=False, on_epoch=True, logger=True)
-        # except ValueError: 
-        #     pass
-
-        # self.test_f1_score.update(preds, targets_int); self.log("test_f1", self.test_f1_score, on_step=False, on_epoch=True, logger=True)
-        # brier_score = torch.mean((preds - targets.float())**2)
-        # self.log("test_brier", brier_score, on_step=False, on_epoch=True, logger=True)
-        # return {"test_loss": loss}
         return loss
 
     def predict_step(self, batch: Any, batch_idx: int):
-
-        
-        # x = x.to("cuda")
-        # y = y.to("cuda")
-        # x, mask, y = batch
-    
         preds = self(batch)  # self.forward(x)
         preds = torch.sigmoid(preds)  # Apply sigmoid activation to the output
         return preds, batch["label"]

@@ -53,10 +53,11 @@ The project expects data to be organized in the following structure:
 
 ## Installation and Setup
 
-### 1. Install PyTorch with CUDA Support
+### 1. Install PyTorch & Tensorflow with CUDA Support
 
 ```bash
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+pip install tensorflow[and-cuda]
 ```
 
 ### 2. Install PyTorch Lightning

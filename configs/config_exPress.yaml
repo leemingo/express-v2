@@ -37,7 +37,7 @@ model:
   use_pressing_features: false
   gnn_type: gat # "gat", "gatv2", "gin", "sage"
   gnn_head: 4
-  pos_weight: None
+  pos_weight: 
 
 early_stop:
   monitor_metric: "val_loss"
