@@ -33,7 +33,7 @@ express-v2/
 The project expects data to be organized in the following structure:
 
 ```
-/data/MHL/
+/data/
 ├── bepro/
 │   ├── raw/                    # Raw BePro data
 │   │   ├── {match_id}/

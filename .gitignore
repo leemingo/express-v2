@@ -27,3 +27,4 @@ scripts/
 wandb/
 notebooks/
 outputs/
+data/
