@@ -1207,6 +1207,7 @@ def load_all_data(data_path: str) -> None:
         data_path: Path to the directory containing match data.
     """
     match_ids = os.listdir(data_path)
+    print(match_ids)
     total_dict = {match_id: {} for match_id in match_ids}
     processed_path = os.path.join(os.path.dirname(data_path), "processed")
     
