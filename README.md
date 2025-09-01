@@ -128,16 +128,42 @@ This step includes:
 - `dfl-spoho`: DFL-SPoHo data
 - `dfl-confidential`: DFL confidential data
 
-### 4. Model Training and Testing
+### 4. Dataset Generation
+
+Generate training datasets for model training. This step must be performed before model training.
+
+```bash
+# Generate cross validation datasets (recommended)
+python datasets.py --data_path /path/to/bepro/processed --save_path /path/to/bepro/processed --cross_validation
+```
+
+#### Available Options
+- `--data_path`: Path to processed data directory
+- `--save_path`: Path to save generated datasets
+- `--cross_validation`: Generate cross validation datasets (default: 6-fold)
+- `--n_folds`: Number of folds for cross validation (default: 6)
+- `--train_ratio`, `--valid_ratio`, `--test_ratio`: Data split ratios
+- `--press_threshold`: Pressing intensity threshold (default: 0.9)
+- `--num_frames_to_sample`: Number of frames to sample per sequence (default: 10)
+- `--high_only`: Only consider high-intensity pressing situations
+- `--exclude_matches`: List of match IDs to exclude
+
+Generated files:
+- `train_dataset.pkl`: Training dataset
+- `valid_dataset.pkl`: Validation dataset  
+- `test_dataset.pkl`: Test dataset
+- `fold_info.pkl`: Cross validation fold information (when using cross validation)
+
+### 5. Model Training and Testing
 
 #### Training Mode
 ```bash
-python main.py --config-name=config_exPress data.root_path=/path/to/dataset
+python main.py --config-name=config_exPress data.root_path=/path/to/train-dataset
 ```
 
 #### Testing Mode
 ```bash
-python main.py --config-name=config_exPress data.root_path=/path/to/dataset mode=test ckpt_path=/path/to/checkpoint.ckpt
+python main.py --config-name=config_exPress data.root_path=/path/to/test-dataset mode=test ckpt_path=/path/to/checkpoint.ckpt
 ```
 
 #### Available Model Types

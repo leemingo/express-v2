@@ -1079,12 +1079,13 @@ class BaseDataset(Dataset):
         """Load dataset data from pickle file or create new dataset.
         
         Args:
-            args (argparse.Namespace): Arguments object containing configuration settings.
             pickled_dataset_path (str, optional): Path to pickled dataset file.
             data_path (str, optional): Path to raw data directory.
             match_id_lst (list, optional): List of match IDs.
             num_frames_to_sample (int): Number of frames to sample for each sequence.
             feature_cols (list, optional): Feature columns to use.
+            highpress_only (bool): Only consider highpress situations.
+            press_threshold (float): Threshold for pressing intensity.
         """
         if pickled_dataset_path and os.path.exists(pickled_dataset_path):
             print(f"Loading dataset from {pickled_dataset_path}...")
@@ -1099,25 +1100,8 @@ class BaseDataset(Dataset):
                 print(f"Error loading pickled dataset: {e}")
                 raise
         else:
-            if data_path is None or match_id_lst is None:
-                raise ValueError("If pickled_dataset_path is not provided, both data_path and match_id_lst must be provided.")
+            raise ValueError("Pickled_dataset_path is not provided. Please generate the dataset first.")
             
-            print(f"Creating new dataset from {data_path} with {len(match_id_lst)} matches...")
-            try:
-                temp_dataset = PressingSequenceDataset(
-                    data_path=data_path,
-                    match_id_lst=match_id_lst,
-                    num_frames_to_sample=num_frames_to_sample,
-                    feature_cols=feature_cols,
-                    highpress_only=highpress_only,
-                    press_threshold=press_threshold
-                )
-                self.loaded_data = temp_dataset.data
-                print(f"Successfully created dataset with {len(self.loaded_data)} samples.")
-            except Exception as e:
-                print(f"Error creating dataset: {e}")
-                raise
-    
     def __len__(self):
         """Get the total number of samples in the dataset.
         
@@ -1396,34 +1380,8 @@ class exPressInputDataset(BaseDataset):
             }
 
 
-
-if __name__ == "__main__":
-    import argparse
-    
-    # Argument parser setup
-    parser = argparse.ArgumentParser(description="Generate pressing intensity datasets from processed match data.")
-    parser.add_argument("--data_path", type=str, required=True, help="Path to the directory containing processed match data")
-    parser.add_argument("--save_path", type=str, required=True, help="Path to save the generated datasets")
-    parser.add_argument("--exclude_matches", type=str, nargs="+", default=["126319", "153381", "153390", "126285"], help="List of match IDs to exclude from processing")
-    parser.add_argument("--high_only", action="store_true", help="Only consider highpress situations")
-    parser.add_argument("--num_frames_to_sample", type=int, default=10, help="Number of frames to sample for each sequence")
-    parser.add_argument("--cross_validation", action="store_true", help="Use cross validation instead of simple train/val/test split")
-    parser.add_argument("--n_folds", type=int, default=6, help="Number of folds for cross validation")
-    parser.add_argument("--train_ratio", type=float, default=0.8, help="Ratio of matches to use for training (when not using CV)")
-    parser.add_argument("--valid_ratio", type=float, default=0.1, help="Ratio of matches to use for validation (when not using CV)")
-    parser.add_argument("--test_ratio", type=float, default=0.1, help="Ratio of matches to use for testing (when not using CV)")
-    parser.add_argument("--press_threshold", type=float, default=0.9, help="Threshold for pressing intensity")
-    
-    args = parser.parse_args()
-    
-    # Check path validity
-    if not os.path.exists(args.data_path):
-        print(f"Error: Data path '{args.data_path}' does not exist.")
-        exit(1)
-    
-    # Create save path
-    os.makedirs(args.save_path, exist_ok=True)
-    
+def generate_datasets(args):
+    """Generate training, validation, and test datasets based on arguments"""
     # Get match ID list
     match_id_lst = [d for d in os.listdir(args.data_path) if os.path.isdir(os.path.join(args.data_path, d))]
     match_id_lst.sort()
@@ -1520,3 +1478,33 @@ if __name__ == "__main__":
         create_and_save_dataset(args, test_match_ids, args.save_path, f"test_dataset")
         
         print("Dataset generation completed successfully!")
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    # Argument parser setup
+    parser = argparse.ArgumentParser(description="Generate pressing intensity datasets from processed match data.")
+    parser.add_argument("--data_path", type=str, required=True, help="Path to the directory containing processed match data")
+    parser.add_argument("--save_path", type=str, required=True, help="Path to save the generated datasets")
+    parser.add_argument("--exclude_matches", type=str, nargs="+", default=["126319", "153381", "153390", "126285"], help="List of match IDs to exclude from processing")
+    parser.add_argument("--high_only", action="store_true", help="Only consider highpress situations")
+    parser.add_argument("--num_frames_to_sample", type=int, default=10, help="Number of frames to sample for each sequence")
+    parser.add_argument("--cross_validation", action="store_true", help="Use cross validation instead of simple train/val/test split")
+    parser.add_argument("--n_folds", type=int, default=6, help="Number of folds for cross validation")
+    parser.add_argument("--train_ratio", type=float, default=0.8, help="Ratio of matches to use for training (when not using CV)")
+    parser.add_argument("--valid_ratio", type=float, default=0.1, help="Ratio of matches to use for validation (when not using CV)")
+    parser.add_argument("--test_ratio", type=float, default=0.1, help="Ratio of matches to use for testing (when not using CV)")
+    parser.add_argument("--press_threshold", type=float, default=0.9, help="Threshold for pressing intensity")
+    
+    args = parser.parse_args()
+    
+    # Check path validity
+    if not os.path.exists(args.data_path):
+        print(f"Error: Data path '{args.data_path}' does not exist.")
+        exit(1)
+    
+    # Create save path
+    os.makedirs(args.save_path, exist_ok=True)
+    
+    generate_datasets(args)
