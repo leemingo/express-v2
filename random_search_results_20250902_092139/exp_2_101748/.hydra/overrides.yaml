@@ -1,0 +1,11 @@
+- data.root_path=../data/express-v2/fold_1
+- model.num_gnn_layers=3
+- model.gnn_hidden_dim=32
+- model.num_lstm_layers=1
+- model.lstm_hidden_dim=256
+- optimizer.optimizer_params.lr=1e-4
+- optimizer.optimizer_params.weight_decay=1e-4
+- model.lstm_dropout=0.5
+- data.batch_size=128
+- model.gnn_head=8
+- exp_name=exp_2_101748

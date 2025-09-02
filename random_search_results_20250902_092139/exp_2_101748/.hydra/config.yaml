@@ -1,0 +1,56 @@
+seed: 42
+exp_name: exp_2_101748
+mode: train
+ckpt_path: null
+model_type: exPress
+data:
+  root_path: ../data/express-v2/fold_1
+  wo_vel: false
+  batch_size: 128
+  val_split_ratio: 0.2
+  num_workers: 4
+  pin_memory: true
+  press_threshold: 0.9
+trainer:
+  max_epochs: 200
+  min_epochs: 10
+  gradient_clip_val: 2.0
+  devices:
+  - 0
+  accelerator: gpu
+optimizer:
+  optimizer_params:
+    lr: 0.0001
+    weight_decay: 0.0001
+model:
+  in_channels: 19
+  num_gnn_layers: 3
+  gnn_hidden_dim: 32
+  num_lstm_layers: 1
+  lstm_hidden_dim: 256
+  lstm_dropout: 0.5
+  lstm_bidirectional: true
+  use_pressing_features: false
+  gnn_type: gat
+  gnn_head: 8
+  pos_weight: null
+early_stop:
+  monitor_metric: val_loss
+  patience: 50
+  min_delta: 0.001
+  mode: min
+  strict: false
+  verbose: true
+checkpoint:
+  monitor_metric: val_loss
+  save_top_k: 1
+  verbose: true
+  mode: min
+logging:
+  use_wandb: false
+  wandb:
+    project: Pressing-Evaluation
+    entity: null
+    api_key: null
+    log_model: true
+    save_code: true

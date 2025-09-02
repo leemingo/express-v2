@@ -141,10 +141,10 @@ class exPressComponent(BaseComponent):
         common_loader_args = self._get_common_loader_args()
 
         # Load datasets
-        train_pkl_path = f"{self.data_cfg.root_path}/train_dataset.pkl"
-        valid_pkl_path = f"{self.data_cfg.root_path}/valid_dataset.pkl"
-        test_pkl_path = f"{self.data_cfg.root_path}/test_dataset.pkl"
-
+        train_pkl_path = f"{self.data_cfg.root_path}/train_dataset_{self.data_cfg.press_threshold}.pkl"
+        valid_pkl_path = f"{self.data_cfg.root_path}/valid_dataset_{self.data_cfg.press_threshold}.pkl"
+        test_pkl_path = f"{self.data_cfg.root_path}/test_dataset_{self.data_cfg.press_threshold}.pkl"
+        print(train_pkl_path)
         try:
             train_dataset = exPressInputDataset(train_pkl_path, wo_vel=self.data_cfg.wo_vel)
             val_dataset = exPressInputDataset(valid_pkl_path, wo_vel=self.data_cfg.wo_vel)

@@ -13,6 +13,7 @@ data:
   val_split_ratio: 0.2
   num_workers: 4
   pin_memory: true
+  press_threshold: 0.9
 
 trainer:
   max_epochs: 200
