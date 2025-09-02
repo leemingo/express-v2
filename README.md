@@ -12,8 +12,10 @@ This project provides a pipeline for preprocessing raw tracking data from footba
 
 ```
 express-v2/
-├── preprocess_bepro.py      # BePro data preprocessing
-├── preprocess_dfl.py        # DFL data preprocessing
+├── preprocess
+│   ├── bepro.py         # BePro data preprocessing
+│   ├── dfl.py           # DFL data preprocessing
+│   └── ...
 ├── assertion/               # Event data validation and SPADL conversion
 │   ├── assert.py           # Main validation script
 │   ├── bepro.py            # BePro data conversion
