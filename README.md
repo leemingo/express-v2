@@ -2,6 +2,8 @@
 
 A machine learning project for evaluating pressing intensity in football matches.
 
+<img src="figs/framework.png" alt="Framework" width="600">
+
 ## Project Overview
 
 This project provides a pipeline for preprocessing raw tracking data from football matches, validating event data and converting it to SPADL format, calculating pressing intensity for each match and frame, and training a pressing evaluation model.
