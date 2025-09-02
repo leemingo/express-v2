@@ -22,7 +22,6 @@ Thumbs.db
 .idea/
 *.swp
 
-figs/
 scripts/
 wandb/
 notebooks/
