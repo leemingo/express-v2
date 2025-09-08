@@ -1,6 +1,6 @@
 # exPress-v2: Pressing Evaluation Model
 
-This repository is the official implementation of [Contextual Evaluation of Individual Contributions from Pressing Situations in Football]([https://arxiv.org/abs/2402.02005](https://dtai.cs.kuleuven.be/events/MLSA25/papers/MLSA25_paper_248.pdf)) (Lee et al., MLSA 2025).
+This repository is the official implementation of [Contextual Evaluation of Individual Contributions from Pressing Situations in Football](https://dtai.cs.kuleuven.be/events/MLSA25/papers/MLSA25_paper_248.pdf) (Lee et al., MLSA 2025).
 
 <img src="figs/framework.png" alt="Framework" width="600">
 
