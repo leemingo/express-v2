@@ -130,7 +130,7 @@ This step includes:
 #### Available Data Sources
 - `bepro`: BePro data (Not open-source)
 - `dfl-spoho`: DFL-SPoHo data (Open-source, [check here](https://github.com/spoho-datascience/idsse-data))
-- `dfl-additional`: DFL confidential data ((Not open-source))
+- `dfl-additional`: DFL confidential data (Not open-source)
 
 ### 4. Dataset Generation
 
