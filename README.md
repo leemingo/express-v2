@@ -1,6 +1,6 @@
 # exPress-v2: Pressing Evaluation Model
 
-A machine learning project for evaluating pressing intensity in football matches.
+This repository is the official implementation of [Contextual Evaluation of Individual Contributions from Pressing Situations in Football]([https://arxiv.org/abs/2402.02005](https://dtai.cs.kuleuven.be/events/MLSA25/papers/MLSA25_paper_248.pdf)) (Lee et al., MLSA 2025).
 
 <img src="figs/framework.png" alt="Framework" width="600">
 
@@ -118,8 +118,8 @@ python pressing_intensity.py --source bepro --data_path /path/to/bepro/processed
 # DFL-SPoHo data
 python pressing_intensity.py --source dfl-spoho --data_path /path/to/dfl-spoho/
 
-# DFL confidential data
-python pressing_intensity.py --source dfl-confidential --data_path /path/to/dfl-confidential/
+# DFL additional data
+python pressing_intensity.py --source dfl-confidential --data_path /path/to/dfl-additional/
 ```
 
 This step includes:
@@ -128,9 +128,9 @@ This step includes:
 - Saving calculated pressing intensity in pickle format
 
 #### Available Data Sources
-- `bepro`: BePro data (default)
-- `dfl-spoho`: DFL-SPoHo data
-- `dfl-confidential`: DFL confidential data
+- `bepro`: BePro data (Not open-source)
+- `dfl-spoho`: DFL-SPoHo data (Open-source, [check here](https://github.com/spoho-datascience/idsse-data))
+- `dfl-additional`: DFL confidential data ((Not open-source))
 
 ### 4. Dataset Generation
 
