@@ -13,6 +13,7 @@ data:
   val_split_ratio: 0.2
   num_workers: 4
   pin_memory: true
+  press_threshold: 0.9
 
 trainer:
   max_epochs: 200
@@ -37,7 +38,7 @@ model:
   use_pressing_features: false
   gnn_type: gat # "gat", "gatv2", "gin", "sage"
   gnn_head: 4
-  pos_weight: None
+  pos_weight: 
 
 early_stop:
   monitor_metric: "val_loss"
