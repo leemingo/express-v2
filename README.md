@@ -181,4 +181,4 @@ This project is developed for research purposes.
 
 ## Contact
 
-If you have any questions about the project, please create an issue. 
+If you have any questions about the project, please contact to minho.lee@uni-saarland.de. 
