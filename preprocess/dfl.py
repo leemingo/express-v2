@@ -61,7 +61,7 @@ def load_team_sheets(path: str) -> pd.DataFrame:
         DataFrame containing combined team information for both home and away teams.
     """
     file_name_info = next((os.path.join(path, filename) for filename in os.listdir(path)
-                           if "matchinformation" in filename), None)
+                           if "matchinformation" in filename or "Spielinformationen" in filename), None)
 
     team_sheets = read_teamsheets_from_mat_info_xml(file_name_info)
 
@@ -98,9 +98,9 @@ def load_event_data(path: str, teamsheet_home: Optional[Teamsheet] = None,
         DataFrame containing all event data from both halves.
     """
     file_name_info = next((os.path.join(path, filename) for filename in os.listdir(path)
-                           if "matchinformation" in filename), None)
+                           if "matchinformation" in filename or "Spielinformationen" in filename), None)
     file_name_event = next((os.path.join(path, filename) for filename in os.listdir(path)
-                                if "events_raw" in filename), None)
+                                if "events_raw" in filename or "Ereignisdaten-Spiel-Roh" in filename), None)
 
     events, _, _ = read_event_data_xml(file_name_event, file_name_info,
                                         teamsheet_home=teamsheet_home, teamsheet_away=teamsheet_away)
@@ -133,9 +133,9 @@ def load_position_data(path: str, teamsheet_home: Optional[Teamsheet] = None,
         Tuple containing (tracking_fullmatch, teams) DataFrames.
     """
     file_name_info = next((os.path.join(path, filename) for filename in os.listdir(path)
-                           if "matchinformation" in filename), None)
+                           if "matchinformation" in filename or "Spielinformationen" in filename), None)
     file_name_pos = next((os.path.join(path, filename) for filename in os.listdir(path) 
-                          if "positions_raw" in filename), None)
+                          if "positions_raw" in filename or "Positionsdaten-Spiel-Roh_Observed" in filename), None)
 
     positions, possession, ballstatus, teamsheets, pitch = read_position_data_xml(
         file_name_pos, file_name_info,
@@ -196,7 +196,7 @@ def display_data_summary(path: str) -> None:
     print("🏆 Unique teams:", team_sheets_all["team"].nunique())
     print("📈 Total number of events:", len(all_events))
     print("📊 Unique event ID counts:\n", all_events["eID"].value_counts())
-    print("📉 Total number of position frames:", n_frames)
+    # print("📉 Total number of position frames:", n_frames)
 
 # def extract_event_pos(events, tracking_data, team_sheets, fps=config.frame_rate):
 #     '''
@@ -951,7 +951,7 @@ def load_and_assemble_tracking_data(path: str, match_id: str) -> Tuple[pd.DataFr
         # Handle different match information file patterns
         # Both use "matchinformation" but with different prefixes
         file_name_info = next((f for f in os.listdir(match_path) 
-                              if "matchinformation" in f), None)
+                              if "matchinformation" in f or "Spielinformationen" in f), None)
 
         if not file_name_pos or not file_name_info:
             print(f"Error: Position or Match Information file not found in {match_path}")
