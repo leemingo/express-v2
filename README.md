@@ -91,6 +91,12 @@ python preprocess/bepro.py --data_path /path/to/bepro/raw/data
 python preprocess/dfl.py --data_path /path/to/dfl/raw/data
 ```
 
+Alternatively,
+```bash
+# Set custom path
+python -m preprocess.dfl --data_path /path/to/dfl/raw/data
+```
+
 This step includes:
 - Loading and cleaning raw tracking data
 - Calculating player and ball positions, velocities, and accelerations
