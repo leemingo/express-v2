@@ -1207,11 +1207,13 @@ def load_all_data(data_path: str) -> None:
         data_path: Path to the directory containing match data.
     """
     match_ids = os.listdir(data_path)
+    match_ids = [match_id for match_id in match_ids if match_id not in ["processed"]]
     print(match_ids)
     total_dict = {match_id: {} for match_id in match_ids}
-    processed_path = os.path.join(os.path.dirname(data_path), "processed")
+    data_path_abs = os.path.abspath(data_path)
+    processed_path = os.path.join(os.path.dirname(data_path_abs), "processed")
     
-    for match_id in match_ids:
+    for idx, match_id in enumerate(match_ids):
         print(f"Preprocessing {match_id}")
         tracking_df, teams_dict, pitch_meta = load_and_assemble_tracking_data(data_path, match_id)
         if teams_dict is not None:
