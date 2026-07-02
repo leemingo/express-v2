@@ -1214,6 +1214,7 @@ def load_all_data(data_path: str) -> None:
     processed_path = os.path.join(os.path.dirname(data_path_abs), "processed")
     
     for idx, match_id in enumerate(match_ids):
+        if match_id != "DFL-MAT-J03YH6": continue
         print(f"Preprocessing {match_id}")
         tracking_df, teams_dict, pitch_meta = load_and_assemble_tracking_data(data_path, match_id)
         if teams_dict is not None:
